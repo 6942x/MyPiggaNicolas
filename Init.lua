@@ -406,8 +406,8 @@ r22.Minimized = r8.hide
 local r36 = {
     Mine = r22:AddTab({ Title = "Mine", Icon = "hammer" }),
     Gears = r22:AddTab({ Title = "Gears", Icon = "settings-2" }),
-    Info = r22:AddTab({ Title = "Info", Icon = "info" }),
     Monster = r22:AddTab({ Title = "Monster", Icon = "skull" }),
+    Info = r22:AddTab({ Title = "Info", Icon = "info" }),
     Settings = r22:AddTab({ Title = "Settings", Icon = "settings" }),
 }
 
@@ -717,11 +717,6 @@ r52(r36.Monster, "Minimum gain per monster sacrifice", "monsterMinimum")
 r44(r36.Monster, "monsterPerks", "Auto Monster Perks")
 r44(r36.Monster, "monsterUpgrades", "Auto Sacrifice Upgrades")
 
-r36.Monster:AddParagraph({
-    Title = "Upgrade Priority",
-    Content = "Perk 1 is requested first after a sacrifice, then the lowest displayed perk price is selected.\nSacrifice upgrades also use their lowest displayed Price.\nUnreadable prices pause purchases; maxed upgrades are skipped.",
-})
-
 local function r56(r)
     r = math.max(0e0, math.ceil(r))
     return string.format("%02d:%02d:%02d", math.floor(r / 3.6e3), math.floor(r / 6e1) % 6e1, r % 6e1)
@@ -758,57 +753,144 @@ local function r58(r, r1)
 end
 
 local function r59(r)
-    local r60 = r and r:FindFirstChild("Frame")
-    local r61 = r and (r:FindFirstChild("Price") or r60 and r60:FindFirstChild("Price"))
+    if not r then
+        return false
+    end
 
-    if not r61 then
+    local r60 = r:GetDescendants()
+    table.insert(r60, 1e0, r)
+
+    for r61, r62 in ipairs(r60) do
+        local r63 = true
+        local r64 = r62
+
+        while r64 and r64 ~= r.Parent do
+            if r64:IsA("GuiObject") and not r64.Visible then
+                r63 = false
+                break
+            end
+
+            r64 = r64.Parent
+        end
+
+        if r63 then
+            local r65, r66 = pcall(function()
+                return r62:GetAttributes()
+            end)
+
+            if r65 then
+                for r67, r68 in pairs(r66) do
+                    local r69 = r67:lower()
+
+                    if
+                        (r69 == "maxed" or r69 == "ismaxed" or r69 == "completed" or r69 == "ismaxlevel")
+                        and r68 == true
+                    then
+                        return true
+                    end
+                end
+
+                local r70 = tonumber(r66.Level or r66.CurrentLevel)
+                local r71 = tonumber(r66.MaxLevel or r66.LevelCap)
+
+                if r70 and r71 and r71 > 0e0 and r70 >= r71 then
+                    return true
+                end
+            end
+
+            if r62:IsA("TextLabel") or r62:IsA("TextButton") or r62:IsA("TextBox") then
+                local r68 = r62.Text:gsub("<[^>]+>", ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
+                local r69 = r62.Name:lower()
+
+                if
+                    r68:match("^max[!%.]*$")
+                    or r68:find("maxed", 1e0, true)
+                    or r68 == "maximum"
+                    or r68 == "max level"
+                    or r68 == "completed"
+                    or r68 == "fully upgraded"
+                then
+                    return true
+                end
+
+                if r69:find("level", 1e0, true) or r68:find("level", 1e0, true) then
+                    local r70, r71 = r68:match("(%d+)%s*/%s*(%d+)")
+
+                    if r70 and tonumber(r71) > 0e0 and tonumber(r70) >= tonumber(r71) then
+                        return true
+                    end
+
+                    if r68:find("(max)", 1e0, true) then
+                        return true
+                    end
+                end
+            end
+        end
+    end
+
+    return false
+end
+
+local function r72(r)
+    if r59(r) then
+        return nil, true
+    end
+
+    local r73 = r and r:FindFirstChild("Frame")
+    local r74 = r and (r:FindFirstChild("Price") or r73 and r73:FindFirstChild("Price"))
+
+    if not r74 then
         return nil, false
     end
 
     local r30
 
-    if r61:IsA("TextLabel") or r61:IsA("TextButton") or r61:IsA("TextBox") then
-        r30 = r61.Text
-    elseif r61:IsA("StringValue") or r61:IsA("NumberValue") or r61:IsA("IntValue") then
-        r30 = tostring(r61.Value)
+    if r74:IsA("TextLabel") or r74:IsA("TextButton") or r74:IsA("TextBox") then
+        r30 = r74.Text
+    elseif r74:IsA("StringValue") or r74:IsA("NumberValue") or r74:IsA("IntValue") then
+        r30 = tostring(r74.Value)
     end
 
     if not r30 then
         return nil, false
     end
 
-    local r62 = r30:gsub("<[^>]+>", ""):lower()
+    local r75 = r30:gsub("<[^>]+>", ""):lower()
 
-    if r62:find("max", 1e0, true) then
+    if r75:gsub("%s", "") == "1,234" then
         return nil, true
     end
 
-    if r62:match("^%s*free%s*$") then
+    if r75:find("max", 1e0, true) then
+        return nil, true
+    end
+
+    if r75:match("^%s*free%s*$") then
         return 0e0, false
     end
 
     return r57(r30), false
 end
 
-local function r63(r, r64)
+local function r76(r, r77)
     if not r then
         return nil
     end
 
-    local r65, r66
+    local r61, r78
 
-    for r67 = 1e0, r64 or 5e0 do
-        local r68, r69 = r59(r:FindFirstChild("Upgrade" .. r67))
+    for r79 = 1e0, r77 or 5e0 do
+        local r68, r80 = r72(r:FindFirstChild("Upgrade" .. r79))
 
-        if not r69 and r68 and (not r66 or r68 < r66) then
-            r65, r66 = r67, r68
+        if not r80 and r68 and (not r78 or r68 < r78) then
+            r61, r78 = r79, r68
         end
     end
 
-    return r65, r66
+    return r61, r78
 end
 
-local function r70(r)
+local function r81(r)
     if not r then
         return nil
     end
@@ -817,45 +899,45 @@ local function r70(r)
         return r
     end
 
-    local r71
+    local r82
 
-    for r65, r72 in ipairs(r:GetDescendants()) do
+    for r61, r62 in ipairs(r:GetDescendants()) do
         if
-            r72.Name == "Upgrade1"
+            r62.Name == "Upgrade1"
             and (
-                r72:FindFirstChild("Price")
-                or r72:FindFirstChild("Frame") and r72.Frame:FindFirstChild("Price")
+                r62:FindFirstChild("Price")
+                or r62:FindFirstChild("Frame") and r62.Frame:FindFirstChild("Price")
             )
         then
-            local r73 = r72.Parent
+            local r64 = r62.Parent
 
-            if r73 and r73:FindFirstChild("Upgrade7") then
-                if r71 and r71 ~= r73 then
+            if r64 and r64:FindFirstChild("Upgrade7") then
+                if r82 and r82 ~= r64 then
                     return nil
                 end
 
-                r71 = r73
+                r82 = r64
             end
         end
     end
 
-    return r71
+    return r82
 end
 
 r20(function()
-    local r74, r75, r76, r77 = 0e0, 0e0, 0e0, 0e0
-    local r78 = 0e0
-    local r79 = true
-    local r80 = {}
-    local r81 = 0e0
-    local r82, r83, r84, r85, r86, r87, r88, r89
-    local r90 = "Waiting for perk prices"
-    local r91 = "Waiting for sacrifice upgrade prices"
+    local r83, r84, r85, r86 = 0e0, 0e0, 0e0, 0e0
+    local r87 = 0e0
+    local r88 = true
+    local r89 = {}
+    local r90 = 0e0
+    local r91, r92, r93, r94, r95, r96, r97, r98
+    local r99 = "Waiting for perk prices"
+    local r100 = "Waiting for sacrifice upgrade prices"
 
-    local function r92(r, r1, ...)
+    local function r101(r, r1, ...)
         if not r or not r:IsA("RemoteEvent") then
-            if not r80[r1] then
-                r80[r1] = true
+            if not r89[r1] then
+                r89[r1] = true
             end
 
             return false
@@ -867,77 +949,84 @@ r20(function()
             return false
         end
 
-        r80[r1] = nil
+        r89[r1] = nil
         return true
     end
 
     while r7.r do
-        local r93 = os.clock()
+        local r102 = os.clock()
 
-        if r93 >= r81 then
-            r81 = r93 + 2e0
-            r82 = r58(game:GetService("ReplicatedStorage"), { "Events" })
-            r83 = r58(r, { "GameplayEvents", "MonsterGain" })
-            r84 = r58(r82, { "MonsterEvolution", "MonsterSacrifice" })
-            r85 = r58(r82, { "PerkUpgrade", "MonsterPerk" })
-            r86 = r58(r82, { "MonsterEvolution", "SacrificeUpgrade" })
-            r87 = r58(workspace, { "Boards", "MonsterSacrifice", "Sacrifice", "SurfaceGui", "Gain" })
-            r88 = r58(workspace, { "Boards", "MonsterLevel", "MonsterPerks", "SurfaceGui", "Info", "List" })
-            r89 = r70(r58(workspace, { "Boards", "MonsterSacrifice" }))
+        if r102 >= r90 then
+            r90 = r102 + 2e0
+            r91 = r58(game:GetService("ReplicatedStorage"), { "Events" })
+            r92 = r58(r, { "GameplayEvents", "MonsterGain" })
+            r93 = r58(r91, { "MonsterEvolution", "MonsterSacrifice" })
+            r94 = r58(r91, { "PerkUpgrade", "MonsterPerk" })
+            r95 = r58(r91, { "MonsterEvolution", "SacrificeUpgrade" })
+            r96 = r58(workspace, { "Boards", "MonsterSacrifice", "Sacrifice", "SurfaceGui", "Gain" })
+            r97 = r58(workspace, { "Boards", "MonsterLevel", "MonsterPerks", "SurfaceGui", "Info", "List" })
+            r98 = r81(r58(workspace, { "Boards", "MonsterSacrifice" })) or r81(r58(workspace, { "Boards" }))
         end
 
-        if r8.monsterClick and r93 >= r74 then
-            r74 = r93 + 1e-1
-            r92(r83, "Monster click")
+        if r8.monsterClick and r102 >= r83 then
+            r83 = r102 + 1e-1
+            r101(r92, "Monster click")
         end
 
-        local r94 = r87 and r57(r87.Text) or nil
+        local r103 = r96 and r57(r96.Text) or nil
 
-        if r8.monsterReset and r93 >= r75 then
-            r75 = r93 + 1e0
+        if r8.monsterReset and r102 >= r84 then
+            r84 = r102 + 1e0
 
-            if r94 and r94 >= r8.monsterMinimum and r92(r84, "Monster sacrifice") then
-                r78 = r93 + 2e-1
-                r79 = true
-                r76 = r78
-            elseif not r94 and not r80.Gain then
-                r80.Gain = true
+            if r103 and r103 >= r8.monsterMinimum and r101(r93, "Monster sacrifice") then
+                r87 = r102 + 2e-1
+                r88 = true
+                r85 = r87
+            elseif not r103 and not r89.Gain then
+                r89.Gain = true
             end
         end
 
-        if r94 then
-            r80.Gain = nil
+        if r103 then
+            r89.Gain = nil
         end
 
-        if r8.monsterPerks and r93 >= r76 and r93 >= r78 then
-            r76 = r93 + 5e-1
-            local r65, r66 = r63(r88)
-            local r95, r96 = r59(r88 and r88:FindFirstChild("Upgrade1"))
+        if r8.monsterPerks and r102 >= r85 and r102 >= r87 then
+            r85 = r102 + 5e-1
+            local r61, r78 = r76(r97)
+            local r104, r105 = r72(r97 and r97:FindFirstChild("Upgrade1"))
 
-            if r79 and not r96 then
-                r65, r66 = r95 and 1e0 or nil, r95
+            if r88 and not r105 and r104 then
+                r61, r78 = 1e0, r104
             end
 
-            if r65 then
-                r90 = "Next perk: " .. r65 .. (r66 and " · " .. r12(r66) or " · priority purchase")
+            if r61 then
+                r99 = "Next perk: " .. r61 .. (r78 and " · " .. r12(r78) or " · priority purchase")
 
-                if r92(r85, "Monster perk", r65) then
-                    r79 = false
+                if r101(r94, "Monster perk", r61) then
+                    r88 = false
                 end
             else
-                r90 = "No readable perk prices, or all perks are maxed"
+                r99 = "No readable perk prices, or all perks are maxed"
             end
         end
 
-        if r8.monsterUpgrades and r93 >= r77 and r93 >= r78 then
-            r77 = r93 + 5e-1
-            local r65, r66 = r63(r89, 7e0)
+        if r8.monsterUpgrades and r102 >= r86 and r102 >= r87 then
+            r86 = r102 + 5e-1
+            local r61, r78 = r76(r98, 7e0)
+            local r106 = r:FindFirstChild("Stats")
+            local r107 = r106 and r106:FindFirstChild("Dark Liquid")
+            local r108 = r107 and r14(r107.Value)
 
-            if r65 then
-                r91 = "Next sacrifice upgrade: " .. r65 .. " · " .. r12(r66)
-                r92(r86, "Sacrifice upgrade", r65)
+            if not r108 then
+                r100 = "Dark Liquid balance unavailable; purchases paused"
+            elseif r61 and r78 <= r108 then
+                r100 = "Next sacrifice upgrade: " .. r61 .. " · " .. r12(r78)
+                r101(r95, "Sacrifice upgrade", r61)
+            elseif r61 then
+                r100 = "Waiting for Dark Liquid: " .. r12(r108) .. " / " .. r12(r78)
             else
-                r91 = "No readable sacrifice prices, or all upgrades are maxed"
+                r100 = "No readable sacrifice prices, or all upgrades are maxed"
             end
         end
 
@@ -948,27 +1037,22 @@ r20(function()
                 .. " · Sacrifice: "
                 .. (r8.monsterReset and "On" or "Off")
                 .. "\nExpected sacrifice gain: "
-                .. (r94 and r12(r94) or "Unavailable")
+                .. (r103 and r12(r103) or "Unavailable")
                 .. "\nPerks: "
                 .. (r8.monsterPerks and "On" or "Off")
                 .. " · Sacrifice upgrades: "
                 .. (r8.monsterUpgrades and "On" or "Off")
-                .. (r8.monsterPerks and "\n" .. r90 or "")
-                .. (r8.monsterUpgrades and "\n" .. r91 or "")
+                .. (r8.monsterPerks and "\n" .. r99 or "")
+                .. (r8.monsterUpgrades and "\n" .. r100 or "")
         )
 
         task.wait(1e-1)
     end
 end)
 
-local r97 = r36.Info:AddParagraph({ Title = "Gears", Content = "Loading statistics..." })
-local r98 = r36.Info:AddParagraph({ Title = "Mining", Content = "" })
-local r99 = r36.Info:AddParagraph({ Title = "Upgrades", Content = "" })
-
-r36.Info:AddParagraph({
-    Title = "How to Use",
-    Content = "Ore duration is adjustable from 10 minutes to 4 hours.\nSelection order determines the sequence.\nK pauses or resumes mining.",
-})
+local r109 = r36.Info:AddParagraph({ Title = "Gears", Content = "Loading statistics..." })
+local r110 = r36.Info:AddParagraph({ Title = "Mining", Content = "" })
+local r111 = r36.Info:AddParagraph({ Title = "Upgrades", Content = "" })
 
 r36.Settings:AddSection("Interface")
 
@@ -1060,36 +1144,36 @@ if r8.hide then
 end
 
 r20(function()
-    local r100 = r:WaitForChild("GameplayEvents", 1.5e1)
-    local r101 = r:WaitForChild("Stats", 1.5e1)
-    local r102 = game:GetService("ReplicatedStorage"):WaitForChild("Events", 1.5e1)
+    local r112 = r:WaitForChild("GameplayEvents", 1.5e1)
+    local r113 = r:WaitForChild("Stats", 1.5e1)
+    local r114 = game:GetService("ReplicatedStorage"):WaitForChild("Events", 1.5e1)
 
     if not r7.r then
         return
     end
 
-    assert(r100 and r101 and r102, "GameplayEvents, Stats, or Events unavailable")
-    local r103 = r100:WaitForChild("Mining", 1.5e1)
-    local r104 = r103 and r103:WaitForChild("MineOre", 1.5e1)
-    local r105 = r102:WaitForChild("GearsUpgrade", 1.5e1)
-    local r106 = r105 and r105:WaitForChild("GearsReset", 1.5e1)
-    local r107 = r102:WaitForChild("MineOre", 1.5e1)
-    local r108 = r107 and r107:WaitForChild("SetDepth", 1.5e1)
-    local r109 = r107 and r107:WaitForChild("MiningTier", 1.5e1)
-    local r110 = r102:WaitForChild("AdjustSetting", 1.5e1)
+    assert(r112 and r113 and r114, "GameplayEvents, Stats, or Events unavailable")
+    local r115 = r112:WaitForChild("Mining", 1.5e1)
+    local r116 = r115 and r115:WaitForChild("MineOre", 1.5e1)
+    local r117 = r114:WaitForChild("GearsUpgrade", 1.5e1)
+    local r118 = r117 and r117:WaitForChild("GearsReset", 1.5e1)
+    local r119 = r114:WaitForChild("MineOre", 1.5e1)
+    local r120 = r119 and r119:WaitForChild("SetDepth", 1.5e1)
+    local r121 = r119 and r119:WaitForChild("MiningTier", 1.5e1)
+    local r122 = r114:WaitForChild("AdjustSetting", 1.5e1)
 
     if not r7.r then
         return
     end
 
-    assert(r104 and r105 and r106 and r108 and r109 and r110, "Mining remotes unavailable")
+    assert(r116 and r117 and r118 and r120 and r121 and r122, "Mining remotes unavailable")
 
-    local function r111(r)
-        local r1 = r101:FindFirstChild(r)
+    local function r123(r)
+        local r1 = r113:FindFirstChild(r)
         return r1 and tonumber(r1.Value) or 0e0
     end
 
-    local function r112(r)
+    local function r124(r)
         local r1 = workspace:FindFirstChild("Boards")
         r1 = r1 and r1:FindFirstChild("GearTypes")
         r1 = r1 and r1:FindFirstChild("GearsReset")
@@ -1105,8 +1189,8 @@ r20(function()
         return r14(r1.Text:gsub("^%s*%+", "")) or 0e0
     end
 
-    local r113 = { 5e1, 6.5e1, 8e1, 9.5e1, 1.2e2 }
-    local r114 = { 0e0, 0e0, 0e0, 0e0, 0e0 }
+    local r125 = { 5e1, 6.5e1, 8e1, 9.5e1, 1.2e2 }
+    local r126 = { 0e0, 0e0, 0e0, 0e0, 0e0 }
 
     r20(function()
         while r7.r do
@@ -1120,43 +1204,43 @@ r20(function()
                 if r and r ~= r7.r8 then
                     local r1 = r7.r10
 
-                    local function r115()
+                    local function r127()
                         return r7.r and r8.r and r1 == r7.r10
                     end
 
-                    local function r116()
-                        r110:FireServer(r9[r][2e0], "OreLuck")
+                    local function r128()
+                        r122:FireServer(r9[r][2e0], "OreLuck")
                         task.wait(1.5e-1)
 
-                        if not r115() then
+                        if not r127() then
                             return
                         end
 
-                        r108:FireServer(r9[r][1e0])
+                        r120:FireServer(r9[r][1e0])
                         task.wait(4e-1)
 
-                        if not r115() then
+                        if not r127() then
                             return
                         end
 
-                        r109:FireServer(1e0)
+                        r121:FireServer(1e0)
                         task.wait(1.5e-1)
 
-                        if not r115() then
+                        if not r127() then
                             return
                         end
 
-                        r109:FireServer(1e0)
+                        r121:FireServer(1e0)
                         task.wait(2e-1)
 
-                        if r115() then
+                        if r127() then
                             r7.r8 = r
                             r7.r7 = nil
                         end
                     end
 
                     r7.r5 = true
-                    local r2, r3 = pcall(r116)
+                    local r2, r3 = pcall(r128)
                     r7.r5 = false
 
                     if not r2 then
@@ -1173,7 +1257,7 @@ r20(function()
                             break
                         end
 
-                        r104:FireServer(r2)
+                        r116:FireServer(r2)
                         task.wait(2e-2)
                     end
 
@@ -1208,16 +1292,16 @@ r20(function()
                     end
 
                     if
-                        (r == 1e0 or r111("GearsUpgrade" .. (r - 1e0)) >= r113[r - 1e0])
-                        and r111("GearsUpgrade" .. r) < r113[r]
-                        and os.clock() >= r114[r]
+                        (r == 1e0 or r123("GearsUpgrade" .. (r - 1e0)) >= r125[r - 1e0])
+                        and r123("GearsUpgrade" .. r) < r125[r]
+                        and os.clock() >= r126[r]
                     then
-                        local r1 = r111("GearsUpgrade" .. r)
-                        r105:FireServer(r, true)
+                        local r1 = r123("GearsUpgrade" .. r)
+                        r117:FireServer(r, true)
                         task.wait(1e0)
 
-                        if r1 == r111("GearsUpgrade" .. r) then
-                            r114[r] = os.clock() + 1.5e1
+                        if r1 == r123("GearsUpgrade" .. r) then
+                            r126[r] = os.clock() + 1.5e1
                         else
                         end
 
@@ -1232,13 +1316,13 @@ r20(function()
 
     r20(function()
         while r7.r do
-            if r8.r2 and r112(1e0) >= r8.r4 then
-                r106:FireServer(1e0)
+            if r8.r2 and r124(1e0) >= r8.r4 then
+                r118:FireServer(1e0)
                 task.wait(1e0)
             end
 
-            if r8.r3 and r112(2e0) >= r8.r5 then
-                r106:FireServer(2e0)
+            if r8.r3 and r124(2e0) >= r8.r5 then
+                r118:FireServer(2e0)
                 task.wait(1e0)
             end
 
@@ -1249,19 +1333,19 @@ r20(function()
     r20(function()
         while r7.r do
             r30(
-                r97,
+                r109,
                 string.format(
                     "Normal: %s\nShiny: %s\nLife: %s\nTitanic: %s",
-                    r12(r111("Gears")),
-                    r12(r111("Gears2")),
-                    r12(r111("Gears3")),
-                    r12(r111("Gears4"))
+                    r12(r123("Gears")),
+                    r12(r123("Gears2")),
+                    r12(r123("Gears3")),
+                    r12(r123("Gears4"))
                 )
             )
 
             r30(
-                r98,
-                string.format("Depth: %s\nOre luck: %s", r12(r111("MiningDepth")), r12(r111("CustomOreLuck")))
+                r110,
+                string.format("Depth: %s\nOre luck: %s", r12(r123("MiningDepth")), r12(r123("CustomOreLuck")))
             )
 
             local r = {}
@@ -1269,11 +1353,11 @@ r20(function()
             for r1 = 1e0, 5e0 do
                 table.insert(
                     r,
-                    string.format("Upgrade %d: %s / %s", r1, r12(r111("GearsUpgrade" .. r1)), r12(r113[r1]))
+                    string.format("Upgrade %d: %s / %s", r1, r12(r123("GearsUpgrade" .. r1)), r12(r125[r1]))
                 )
             end
 
-            r30(r99, table.concat(r, "\n"))
+            r30(r111, table.concat(r, "\n"))
             task.wait(5e-1)
         end
     end)
