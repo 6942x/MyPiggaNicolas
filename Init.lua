@@ -1,1437 +1,1391 @@
-local r = [====[
-local r = game:GetService("Players").LocalPlayer
-local r1 = game:GetService("TweenService")
-local r2 = game:GetService("UserInputService")
-local r3 = game:GetService("HttpService")
-local r4 = type(getgenv) == "function" and getgenv() or shared
+local source = [====[
+-- =========================================================
+--  Regrowth Incremental Â· Auto Farm
+-- =========================================================
 
-if not r then
+local plr = game:GetService("Players").LocalPlayer
+local UserInputService = game:GetService("UserInputService")
+local HttpService = game:GetService("HttpService")
+local RunService = game:GetService("RunService")
+local env = type(getgenv) == "function" and getgenv() or shared
+
+if not plr then
     warn("[Auto Farm] Run this script inside the game client")
     return
 end
 
-local r5 = "AutoFarm_" .. game.PlaceId .. "_" .. r.UserId
-local r6 = r5 .. ".json"
+-- ===================== QUICK CONFIG ======================
+-- Nomes EXATOS dos valores no Player.Stats (confirmados pelo locator):
+local CURRENCY_NAMES = {
+    money = "Money",
+    emerald = "EmeraldCoins",
+    gold = "Gold",
+    goldDiamond = "GoldenDiamond",
+}
 
-if type(r4[r5]) == "table" and type(r4[r5].r) == "function" then
-    pcall(r4[r5].r)
+-- Tree principal: upgrades comprados (nessa ordem)
+local TREE_MAIN_IDS = { 1, 2, 3, 4, 5, 10, 19, 23, 26, 42, 43, 72 }
+-- Gold Diamond: prioridade de compra (somente esses)
+local DIAMOND_ORDER = { 10, 3, 2, 6, 14, 1, 9, 11, 15 }
+-- =========================================================
+
+local stateKey = "AutoFarm_" .. game.PlaceId .. "_" .. plr.UserId
+local configFile = stateKey .. ".json"
+
+if type(env[stateKey]) == "table" and type(env[stateKey].unload) == "function" then
+    pcall(env[stateKey].unload)
 end
 
-local r7 = { r = true, r1 = {}, r2 = {}, r3 = {}, r4 = {}, r5 = false, r10 = 0e0 }
+local rt = {
+    alive = true,
+    connections = {},
+    threads = {},
+    toggles = {},
+    currentOre = nil,
+    session = 0,
+}
 
-r4[r5] = {
-    r = function()
-        r7.r = false
+env[stateKey] = {
+    unload = function()
+        rt.alive = false
     end,
 }
 
-local r8 = {
-    r = false,
-    r1 = false,
-    r2 = false,
-    r3 = false,
-    r4 = 1e6,
-    r5 = 5e3,
-    r6 = { "Coal", "Garnet", "Onyx", "Copper", "Plutonium" },
-    r7 = "Onyx",
-    r8 = false,
-    r9 = 1e0,
-    r10 = 0e0,
-    hide = false,
-    key = "G",
-    duration = 7.2e3,
+local CFG = {
+    autoMine = false,
+    multiOres = false,
+    singleOre = "Onyx",
+    cycleOres = { "Coal", "Garnet", "Onyx", "Copper", "Plutonium" },
+    oreSlot = 1,
+    oreElapsed = 0,
+    duration = 7200,
+
+    autoUpgradeGears = false,
+    autoResetNormal = false,
+    autoResetShiny = false,
+    minShiny = 1e6,
+    minLife = 5e3,
+
     monsterClick = false,
     monsterReset = false,
     monsterPerks = false,
     monsterUpgrades = false,
     monsterMinimum = 1e6,
+
+    treeMain = false,
+    treeEmerald = false,
+    treeGold = false,
+    treeDiamond = false,
+    diamondReset = false,
+    diamondResetMinimum = 1e6,
+
+    hide = false,
+    hideOrePopup = false,
+    key = "G",
 }
 
-local r9 = {
-    Coal = { 0e0, 1e0 },
-    Tin = { 0e0, 4e0 },
-    Copper = { 0e0, 6.22e2 },
-    Iron = { 3.25e2, 1e0 },
-    Silver = { 2e1, 6e1 },
-    Gold = { 2e1, 6.22e2 },
-    Topaz = { 1.25e2, 1.8e2 },
-    Sapphire = { 1.25e2, 6.22e2 },
-    Ruby = { 5e3, 3.2e1 },
-    Emerald = { 6e2, 6.22e2 },
-    Azurite = { 5e3, 1.45e2 },
-    Diamond = { 5e3, 5.5e2 },
-    Tanzanite = { 7.5e3, 6.22e2 },
-    Plutonium = { 7.5e3, 2.05e2 },
-    Uranium = { 2.75e4, 1e0 },
-    Onyx = { 5.25e4, 3e1 },
-    Garnet = { 2.75e4, 6.22e2 },
-    Neptunium = { 1.5e5, 6.22e2 },
-    Osmium = { 4.5e6, 6.22e2 },
-    Mithril = { 6.25e6, 6.22e2 },
-    Painite = { 6.25e6, 6.22e2 },
+local ORES = {
+    Coal = { 0, 1 },
+    Tin = { 0, 4 },
+    Copper = { 0, 622 },
+    Iron = { 325, 1 },
+    Silver = { 20, 60 },
+    Gold = { 20, 622 },
+    Topaz = { 125, 180 },
+    Sapphire = { 125, 622 },
+    Ruby = { 5000, 32 },
+    Emerald = { 600, 622 },
+    Azurite = { 5000, 145 },
+    Diamond = { 5000, 550 },
+    Tanzanite = { 7500, 622 },
+    Plutonium = { 7500, 205 },
+    Uranium = { 27500, 1 },
+    Onyx = { 52500, 30 },
+    Garnet = { 27500, 622 },
+    Neptunium = { 150000, 622 },
+    Osmium = { 4500000, 622 },
+    Mithril = { 6250000, 622 },
+    Painite = { 6250000, 622 },
 }
 
-local r10 = {
-    "",
-    "K",
-    "M",
-    "B",
-    "T",
-    "Qa",
-    "Qi",
-    "Sx",
-    "Sp",
-    "Oc",
-    "No",
-    "Dc",
-    "Ud",
-    "Dd",
-    "Td",
-    "Qad",
-    "Qid",
-    "Sxd",
-    "Spd",
-    "Ocd",
-    "Nod",
-    "Vg",
+local SUFFIXES = {
+    "", "K", "M", "B", "T", "Qa", "Qi", "Sx", "Sp", "Oc", "No", "Dc",
+    "Ud", "Dd", "Td", "Qad", "Qid", "Sxd", "Spd", "Ocd", "Nod", "Vg",
 }
 
-local function r11(r, r1)
-    local r2, r3 = string.format("%." .. (r1 or 3e0) .. "e", r):match("^(.-)e([+-]?%d+)$")
-    r2 = r2:gsub("%.?0+$", "")
-    return r2 .. "e" .. tostring(tonumber(r3))
+local function formatSci(value, digits)
+    local mantissa, exponent = string.format("%." .. (digits or 3) .. "e", value):match("^(.-)e([+-]?%d+)$")
+    mantissa = mantissa:gsub("%.?0+$", "")
+    return mantissa .. "e" .. tostring(tonumber(exponent))
 end
 
-local function r12(r)
-    r = tonumber(r)
-
-    if not r or r ~= r or math.abs(r) == math.huge then
-        return "—"
+local function formatNumber(value)
+    value = tonumber(value)
+    if not value or value ~= value or math.abs(value) == math.huge then
+        return "-"
     end
-
-    local r1 = r11(r)
-    local r2 = tonumber(r1)
-    local r3 = math.abs(r2)
-    local r4 = 1e0
-
-    while r3 >= 1e3 and r4 < #r10 do
-        r3 = r3 / 1e3
-        r4 = r4 + 1e0
+    local sci = formatSci(value)
+    local sciValue = tonumber(sci)
+    local abs = math.abs(sciValue)
+    local index = 1
+    while abs >= 1000 and index < #SUFFIXES do
+        abs = abs / 1000
+        index = index + 1
     end
-
-    local r5 = r1
-
-    if r3 < 1e3 then
-        r5 = string.format("%.3f", r2 / 1e3 ^ (r4 - 1e0)):gsub("%.?0+$", "") .. r10[r4]
-
-        if r2 ~= 0e0 and math.abs(r2) < 1e-3 then
-            r5 = r1
+    local suffixed = sci
+    if abs < 1000 then
+        suffixed = string.format("%.3f", sciValue / 1000 ^ (index - 1)):gsub("%.?0+$", "") .. SUFFIXES[index]
+        if sciValue ~= 0 and math.abs(sciValue) < 1e-3 then
+            suffixed = sci
         end
     end
-
-    return r1 .. " (" .. r5 .. ")"
+    return sci .. " (" .. suffixed .. ")"
 end
 
-local r13 = {
-    k = 1e3,
-    m = 1e6,
-    b = 1e9,
-    t = 1e12,
-    qa = 1e15,
-    qi = 1e18,
-    sx = 1e21,
-    sp = 1e24,
-    oc = 1e27,
-    no = 1e30,
-    dc = 1e33,
-    [""] = 1e0,
+local SUFFIX_MAP = {
+    k = 1e3, m = 1e6, b = 1e9, t = 1e12, qa = 1e15, qi = 1e18,
+    sx = 1e21, sp = 1e24, oc = 1e27, no = 1e30, dc = 1e33, [""] = 1,
 }
 
-local function r14(r)
-    local r1 = tostring(r):lower():gsub("%s*%([^()]*%)%s*$", ""):gsub("[%s,]", "")
-    local r2 = tonumber(r1)
-
-    if not r2 then
-        local r3, r4 = r1:match("^([%d%.]+)(%a*)$")
-        local r5 = r3 and tonumber(r3)
-        local r6 = r4 and r13[r4]
-
-        if r5 and r6 then
-            r2 = r5 * r6
+local function parseNumber(value)
+    local text = tostring(value):lower():gsub("%s*%([^()]*%)%s*$", ""):gsub("[%s,]", "")
+    local number = tonumber(text)
+    if not number then
+        local digits, suffix = text:match("^([%d%.]+)(%a*)$")
+        local multiplier = digits and tonumber(digits)
+        local factor = suffix and SUFFIX_MAP[suffix]
+        if multiplier and factor then
+            number = multiplier * factor
         end
     end
-
-    if r2 and r2 == r2 and r2 >= 0e0 and r2 < math.huge then
-        return r2
+    if number and number == number and number >= 0 and number < math.huge then
+        return number
     end
 end
 
-local r15 = {}
-
-for r, r1 in pairs(r9) do
-    table.insert(r15, r)
+local function parseTextNumber(text)
+    if type(text) ~= "string" then
+        return nil
+    end
+    text = text:gsub("<[^>]+>", ""):gsub(",", "")
+    local value = parseNumber(text:gsub("^%s*%+", ""))
+    if value then
+        return value
+    end
+    local sci = text:match("[%d%.]+[eE][+%-]?%d+")
+    if sci then
+        return parseNumber(sci)
+    end
+    local digits, suffix = text:match("([%d%.]+)%s*([%a]*)")
+    return digits and parseNumber(digits .. suffix) or nil
 end
 
-table.sort(r15)
+local ORE_NAMES = {}
+for ore in pairs(ORES) do
+    table.insert(ORE_NAMES, ore)
+end
+table.sort(ORE_NAMES)
+local ORE_NAMES_SNAPSHOT = table.clone(ORE_NAMES)
 
-local function r16(r)
-    if type(r) ~= "table" then
+local function applyConfig(config)
+    if type(config) ~= "table" then
         return
     end
-
-    for r1, r2 in pairs(r8) do
-        if type(r2) == "boolean" and type(r[r1]) == "boolean" then
-            r8[r1] = r[r1]
+    for key, value in pairs(CFG) do
+        if type(value) == "boolean" and type(config[key]) == "boolean" then
+            CFG[key] = config[key]
         end
     end
-
-    for r1, r2 in ipairs({ "r4", "r5", "monsterMinimum" }) do
-        if type(r[r2]) == "number" and r[r2] > 0e0 and r[r2] < math.huge then
-            r8[r2] = r[r2]
+    for _, key in ipairs({ "minShiny", "minLife", "monsterMinimum", "diamondResetMinimum" }) do
+        local value = tonumber(config[key])
+        if value and value > 0 and value < math.huge then
+            CFG[key] = value
         end
     end
-
-    if type(r.key) == "string" then
-        local r1, r2 = pcall(function()
-            return Enum.KeyCode[r.key]
+    if type(config.key) == "string" then
+        local ok, keyCode = pcall(function()
+            return Enum.KeyCode[config.key]
         end)
-
-        if
-            r1
-            and r2
-            and not table.find({ "Unknown", "K", "Escape", "F9", "F11", "F12", "PrintScreen" }, r.key)
-        then
-            r8.key = r.key
+        if ok and keyCode and not table.find({ "Unknown", "K", "Escape", "F9", "F11", "F12", "PrintScreen" }, config.key) then
+            CFG.key = config.key
         end
     end
-
-    if r9[r.r7] then
-        r8.r7 = r.r7
+    if ORES[config.singleOre] then
+        CFG.singleOre = config.singleOre
     end
-
-    if type(r.r6) == "table" then
-        local r1 = {}
-
-        for r2, r3 in ipairs(r.r6) do
-            if r9[r3] and not table.find(r1, r3) then
-                table.insert(r1, r3)
+    if type(config.cycleOres) == "table" then
+        local ores = {}
+        for _, ore in ipairs(config.cycleOres) do
+            if ORES[ore] and not table.find(ores, ore) then
+                table.insert(ores, ore)
             end
         end
-
-        r8.r6 = r1
+        CFG.cycleOres = ores
     end
-
-    r8.r9 = math.clamp(math.floor(r14(r.r9) or 1e0), 1e0, math.max(1e0, #r8.r6))
-    r8.duration = math.clamp(math.floor((r14(r.duration) or 7.2e3) / 6e2 + 5e-1), 1e0, 2.4e1) * 6e2
-    r8.r10 = math.clamp(r14(r.r10) or 0e0, 0e0, r8.duration)
+    CFG.oreSlot = math.clamp(math.floor(parseNumber(config.oreSlot) or 1), 1, math.max(1, #CFG.cycleOres))
+    CFG.duration = math.clamp(math.floor((parseNumber(config.duration) or 7200) / 600 + 0.5), 1, 24) * 600
+    CFG.oreElapsed = math.clamp(parseNumber(config.oreElapsed) or 0, 0, CFG.duration)
 end
 
 if type(readfile) == "function" then
-    local r, r1 = pcall(function()
-        return r3:JSONDecode(readfile(r6))
+    local ok, decoded = pcall(function()
+        return HttpService:JSONDecode(readfile(configFile))
     end)
-
-    if r then
-        r16(r1)
+    if ok then
+        applyConfig(decoded)
     end
 end
+applyConfig(env[stateKey .. "_config"])
 
-r16(r4[r5 .. "_config"])
-
-local function r17()
-    r4[r5 .. "_config"] = table.clone(r8)
-    r4[r5 .. "_config"].r6 = table.clone(r8.r6)
-
+local function saveConfig()
+    env[stateKey .. "_config"] = table.clone(CFG)
+    env[stateKey .. "_config"].cycleOres = table.clone(CFG.cycleOres)
     if type(writefile) == "function" then
-        local r, r1 = pcall(function()
-            writefile(r6, r3:JSONEncode(r8))
+        pcall(function()
+            writefile(configFile, HttpService:JSONEncode(CFG))
         end)
-
-        r7.r6 = r and "Configuration saved" or "Failed to save configuration file"
-    else
-        r7.r6 = "Configuration saved for this session"
     end
 end
 
-local function r18(r, r1)
-    local r2 = r:Connect(r1)
-    table.insert(r7.r1, r2)
-    return r2
+local function track(connection)
+    rt.connections[#rt.connections + 1] = connection
+    return connection
 end
 
-local r19
-
-local function r20(r)
-    local r1 = task.defer(function()
-        if r7.r then
-            local r1, r2 = xpcall(r, debug.traceback)
-
-            if not r1 and r7.r then
-                r7.r7 = tostring(r2)
-
-                if r19 then
-                    r19(r2)
-                end
-
-                warn(r2)
+local function spawnTask(fn)
+    local thread = task.defer(function()
+        if rt.alive then
+            local ok, err = xpcall(fn, debug.traceback)
+            if not ok and rt.alive then
+                warn("[Regrowth thread error] " .. tostring(err))
             end
         end
-
-        r7.r2[coroutine.running()] = nil
+        rt.threads[coroutine.running()] = nil
     end)
-
-    r7.r2[r1] = true
-    return r1
+    rt.threads[thread] = true
+    return thread
 end
 
-local r21
-local r22
-local r23 = false
-local r24 = false
-local r25 = {}
-local r26 = {}
-local r27
-local r28 = false
-local r29
-
-local function r30(r, r1)
-    if r and r.rText ~= r1 then
-        r.rText = r1
-        r:SetDesc(r1)
+local function fireRemote(remote, ...)
+    if not remote or not remote:IsA("RemoteEvent") then
+        return false
     end
+    local ok = pcall(remote.FireServer, remote, ...)
+    return ok
 end
 
-local function r31()
-    if not r7.r then
+local function findPath(root, parts)
+    for _, part in ipairs(parts) do
+        root = root and root:FindFirstChild(part)
+    end
+    return root
+end
+
+local function statValue(name)
+    local stats = plr:FindFirstChild("Stats")
+    local value = stats and stats:FindFirstChild(name)
+    if not value then
+        return nil
+    end
+    local ok, number = pcall(function()
+        return tonumber(value.Value)
+    end)
+    if ok then
+        return number
+    end
+    return nil
+end
+
+-- Anti-spam "Reached Max Upgrade": quando o servidor recusa uma compra,
+-- o upgrade fica em cooldown por 30s (chave = categoria:id).
+local rejectCooldown = {}
+local lastFireKey, lastFireTime = nil, 0
+
+local function noteFire(key)
+    lastFireKey = key
+    lastFireTime = os.clock()
+end
+
+local guardsActive = false
+local settingGuard = false
+local waitingForKey = false
+local library
+local window
+local keybindButton
+
+local function unload()
+    if not rt.alive then
         return
     end
-
-    r17()
-    r7.r = false
-    r7.r10 = r7.r10 + 1e0
-    r28 = false
-
-    for r, r1 in ipairs(r7.r1) do
-        pcall(r1.Disconnect, r1)
+    saveConfig()
+    rt.alive = false
+    for _, connection in ipairs(rt.connections) do
+        pcall(connection.Disconnect, connection)
     end
-
-    for r, r1 in pairs(r7.r2) do
-        if r ~= coroutine.running() and coroutine.status(r) ~= "dead" then
-            pcall(task.cancel, r)
+    for thread in pairs(rt.threads) do
+        if thread ~= coroutine.running() and coroutine.status(thread) ~= "dead" then
+            pcall(task.cancel, thread)
         end
     end
-
-    for r, r1 in pairs(r7.r3) do
-        pcall(r1.Cancel, r1)
+    table.clear(rt.connections)
+    table.clear(rt.threads)
+    if library and not library.Unloaded then
+        pcall(library.Destroy, library)
     end
-
-    table.clear(r7.r1)
-    table.clear(r7.r2)
-    table.clear(r7.r3)
-
-    if r21 and not r21.Unloaded then
-        pcall(r21.Destroy, r21)
-    end
-
-    if r4[r5] and r4[r5].r == r31 then
-        r4[r5] = nil
+    if env[stateKey] and env[stateKey].unload == unload then
+        env[stateKey] = nil
     end
 end
 
-r7.r9 = r31
-r4[r5] = { r = r31 }
+rt.unload = unload
+env[stateKey] = { unload = unload }
 
-local function r32()
-    local r = "https://github.com/dawid-scripts/Fluent/releases/download/1.1.0/main.lua"
-    local r1 = "Regrowth_Fluent_1_1_0.lua"
-
-    local r2, r3 = pcall(function()
-        return game:HttpGet(r)
+local function loadFluent()
+    local url = "https://github.com/dawid-scripts/Fluent/releases/download/1.1.0/main.lua"
+    local cacheFile = "Regrowth_Fluent_1_1_0.lua"
+    local ok, content = pcall(function()
+        return game:HttpGet(url)
     end)
-
-    if not r7.r then
-        return
+    if not rt.alive then
+        return nil
     end
-
-    if r2 and type(r3) == "string" and #r3 > 2e2 then
+    if ok and type(content) == "string" and #content > 200 then
         if type(writefile) == "function" then
-            pcall(writefile, r1, r3)
+            pcall(writefile, cacheFile, content)
         end
     elseif type(readfile) == "function" then
-        r2, r3 = pcall(readfile, r1)
+        ok, content = pcall(readfile, cacheFile)
     end
-
-    assert(r2 and type(r3) == "string" and #r3 > 2e2, "Fluent unavailable: check your connection")
-    local r4, r5 = loadstring(r3, "=Regrowth.Fluent.1.1.0")
-    assert(r4, "Failed to compile Fluent: " .. tostring(r5))
-    return r4()
+    assert(ok and type(content) == "string" and #content > 200, "Fluent unavailable: check your connection")
+    local chunk, err = loadstring(content, "=Regrowth.Fluent.1.1.0")
+    assert(chunk, "Failed to compile Fluent: " .. tostring(err))
+    return chunk()
 end
 
-local r33, r34 = pcall(r32)
+local loadOk, lib = pcall(loadFluent)
 
-if not r7.r then
-    if r33 and type(r34) == "table" then
-        pcall(r34.Destroy, r34)
+if not rt.alive then
+    if loadOk and type(lib) == "table" then
+        pcall(lib.Destroy, lib)
     end
-
     return
 end
 
-if not r33 or type(r34) ~= "table" then
-    r31()
-    error("[Regrowth] " .. tostring(r34), 0e0)
+if not loadOk or type(lib) ~= "table" then
+    unload()
+    error("[Regrowth] " .. tostring(lib), 0)
 end
 
-r21 = r34
+library = lib
 
-local r35 = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(8e2, 6e2)
+local viewport = workspace.CurrentCamera and workspace.CurrentCamera.ViewportSize or Vector2.new(800, 600)
 
-r22 = r21:CreateWindow({
+window = library:CreateWindow({
     Title = "Regrowth Incremental",
     SubTitle = "Auto Farm",
-    TabWidth = 1.3e2,
+    TabWidth = 130,
     Size = UDim2.fromOffset(
-        math.max(3.6e2, math.min(6.4e2, r35.X - 2.4e1)),
-        math.max(3.2e2, math.min(5.3e2, r35.Y - 6.4e1))
+        math.max(360, math.min(640, viewport.X - 24)),
+        math.max(320, math.min(530, viewport.Y - 64))
     ),
     Acrylic = false,
     Theme = "Darker",
-    MinimizeKey = { Name = r8.key },
+    MinimizeKey = { Name = CFG.key },
 })
 
-r18(r21.GUI.Destroying, r31)
-r22.Root.Visible = not r8.hide
-r22.Minimized = r8.hide
+if library.GUI then
+    track(library.GUI.Destroying:Connect(unload))
+end
+window.Root.Visible = not CFG.hide
+window.Minimized = CFG.hide
 
-local r36 = {
-    Mine = r22:AddTab({ Title = "Mine", Icon = "hammer" }),
-    Gears = r22:AddTab({ Title = "Gears", Icon = "settings-2" }),
-    Monster = r22:AddTab({ Title = "Monster", Icon = "skull" }),
-    Info = r22:AddTab({ Title = "Info", Icon = "info" }),
-    Settings = r22:AddTab({ Title = "Settings", Icon = "settings" }),
-}
+local mineTab = window:AddTab({ Title = "Mine", Icon = "hammer" })
+local gearsTab = window:AddTab({ Title = "Gears", Icon = "settings-2" })
+local monsterTab = window:AddTab({ Title = "Monster", Icon = "skull" })
+local treeTab = window:AddTab({ Title = "Upgrade Tree", Icon = "trees" })
+local settingsTab = window:AddTab({ Title = "Settings", Icon = "settings" })
 
-local r37
-local r38
-local r39
-local r40 = ""
-local r41 = table.clone(r15)
+-- ==================== helpers de UI ====================
 
-local function r42()
-    local r = {}
-
-    for r1, r2 in ipairs(r8.r6) do
-        r[#r + 1e0] = tostring(r1) .. ". " .. r2
-    end
-
-    r30(r37, #r > 0e0 and table.concat(r, " · ") or "No ores selected")
+local function resetOreProgress()
+    CFG.oreSlot = 1
+    CFG.oreElapsed = 0
+    rt.currentOre = nil
+    rt.session = rt.session + 1
+    saveConfig()
 end
 
-local function r43(r)
-    r8.r9 = 1e0
-    r8.r10 = 0e0
-    r7.r8 = nil
-    r7.r10 = r7.r10 + 1e0
-    r42()
-    r17()
-
-    if r then
-    end
-end
-
-local function r44(r, r1, r2)
-    local r3 = r:AddToggle(r1, {
-        Title = r2,
-        Default = r8[r1],
-        Callback = function(r)
-            if not r23 or r24 or not r7.r or r8[r1] == r then
+local function addToggle(tab, key, title)
+    local toggle = tab:AddToggle(key, {
+        Title = title,
+        Default = CFG[key],
+        Callback = function(value)
+            if not guardsActive or settingGuard or not rt.alive or CFG[key] == value then
                 return
             end
-
-            r8[r1] = r
-
-            if r1 == "r" then
-                r7.r10 = r7.r10 + 1e0
+            CFG[key] = value
+            if key == "autoMine" then
+                rt.session = rt.session + 1
             end
-
-            if r1 == "r8" then
-                r43()
+            if key == "multiOres" then
+                resetOreProgress()
             else
-                r17()
+                saveConfig()
             end
         end,
     })
-
-    r7.r4[r1] = r3
-    return r3
+    rt.toggles[key] = toggle
+    return toggle
 end
 
-r44(r36.Mine, "r", "Auto Mine · K")
-r44(r36.Mine, "r8", "Multi Ores")
-local r45
-
-r45 = r36.Mine:AddSlider("OreDuration", {
-    Title = "Time per ore (minutes)",
-    Description = "10-minute steps · 10 minutes to 4 hours",
-    Min = 1e1,
-    Max = 2.4e2,
-    Rounding = 0e0,
-    Default = r8.duration / 6e1,
-    Callback = function(r)
-        if not r23 or r24 or not r7.r then
-            return
-        end
-
-        local r1 = math.clamp(math.floor(r / 1e1 + 5e-1), 1e0, 2.4e1) * 1e1
-
-        if r ~= r1 then
-            r24 = true
-            r45:SetValue(r1)
-            r24 = false
-        end
-
-        r = r1
-        r1 = r * 6e1
-
-        if r1 == r8.duration then
-            return
-        end
-
-        r8.duration = r1
-        r8.r10 = math.min(r8.r10, r1)
-        r17()
-    end,
-})
-
-r38 = r36.Mine:AddDropdown("SingleOre", {
-    Title = "Single Ore",
-    Description = "Used when Multi Ores is disabled",
-    Values = r15,
-    Multi = false,
-    Default = r8.r7,
-    Callback = function(r)
-        if not r23 or r24 or not r7.r or not r9[r] or r8.r7 == r then
-            return
-        end
-
-        r8.r7 = r
-
-        if not r8.r8 then
-            r43("Selected ore: " .. r)
-        else
-            r17()
-        end
-    end,
-})
-
-r39 = r36.Mine:AddDropdown("CycleOres", {
-    Title = "Cycle Ores",
-    Description = "Selection order determines the mining sequence",
-    Values = r15,
-    Multi = true,
-    Default = r8.r6,
-    Callback = function(r)
-        if not r23 or r24 or not r7.r then
-            return
-        end
-
-        local r1 = {}
-
-        for r2, r3 in ipairs(r8.r6) do
-            if r[r3] then
-                r1[#r1 + 1e0] = r3
-            end
-        end
-
-        for r2, r3 in ipairs(r15) do
-            if r[r3] and not table.find(r1, r3) then
-                r1[#r1 + 1e0] = r3
-            end
-        end
-
-        if table.concat(r1, "|") == table.concat(r8.r6, "|") then
-            return
-        end
-
-        r8.r6 = r1
-
-        if r8.r8 then
-            r43("Cycle selection updated")
-        else
-            r42()
-            r17()
-        end
-    end,
-})
-
-local function r46(r)
-    r8.r6 = r
-    local r1 = {}
-
-    for r2, r3 in ipairs(r) do
-        r1[r3] = true
+local function addNumberInput(tab, title, key)
+    local input
+    local before = {}
+    for _, object in ipairs(tab.Container:GetDescendants()) do
+        before[object] = true
     end
 
-    r24 = true
-    r39:SetValues(r15)
-    r39:SetValue(r1)
-    r39:SetValues(r41)
-    r24 = false
-    r43(#r == 0e0 and "Cycle selection cleared" or "All ores selected")
-end
-
-r36.Mine:AddButton({
-    Title = "Select All",
-    Callback = function()
-        local r = table.clone(r8.r6)
-
-        for r1, r2 in ipairs(r15) do
-            if not table.find(r, r2) then
-                r[#r + 1e0] = r2
-            end
-        end
-
-        r46(r)
-    end,
-})
-
-r36.Mine:AddButton({
-    Title = "Clear Selection",
-    Callback = function()
-        r46({})
-    end,
-})
-
-r37 = r36.Mine:AddParagraph({ Title = "Cycle Order", Content = "" })
-r42()
-
-local r47 = r36.Mine:AddParagraph({ Title = "Mining", Content = "Waiting for mining" })
-
-local r48 = r36.Mine:AddParagraph({
-    Title = "Ore Progress",
-    Content = "0% (" .. string.format(
-        "%02d:%02d:%02d",
-        math.floor(r8.duration / 3.6e3),
-        math.floor(r8.duration / 6e1) % 6e1,
-        r8.duration % 6e1
-    ) .. " remaining)",
-})
-
-local r49 = Instance.new("Frame")
-r49.Size = UDim2.new(1e0, -2e1, 0e0, 3e0)
-r49.Position = UDim2.new(0e0, 1e1, 1e0, -5e0)
-r49.BackgroundColor3 = Color3.fromRGB(4.5e1, 4.9e1, 6e1)
-r49.BorderSizePixel = 0e0
-r49.Parent = r48.Frame
-local r50 = Instance.new("Frame")
-r50.Size = UDim2.fromScale(0e0, 1e0)
-r50.BackgroundColor3 = Color3.fromRGB(1.03e2, 1.48e2, 2.55e2)
-r50.BorderSizePixel = 0e0
-r50.Parent = r49
-
-local function r51(r, r2)
-    if r7.r3[r] then
-        r7.r3[r]:Cancel()
-    end
-
-    if r.Size == r2.Size then
-        return
-    end
-
-    local r3 = r1:Create(r, TweenInfo.new(1.8e-1, Enum.EasingStyle.Quad), r2)
-    r7.r3[r] = r3
-
-    r3.Completed:Once(function()
-        if r7.r3[r] == r3 then
-            r7.r3[r] = nil
-        end
-    end)
-
-    r3:Play()
-end
-
-r44(r36.Gears, "r1", "Auto Upgrade")
-r44(r36.Gears, "r2", "Auto Reset Normal → Shiny")
-
-local function r52(r53, r, r1)
-    local r2 = {}
-
-    for r3, r4 in ipairs(r53.Container:GetDescendants()) do
-        r2[r4] = true
-    end
-
-    local r3
-
-    local function r54(r)
-        if not r23 or r24 or not r7.r then
+    local function commit(text)
+        if not guardsActive or settingGuard or not rt.alive then
             return
         end
-
-        local r2 = r == r12(r8[r1]) and r8[r1] or r14(r)
-
-        if r2 and r2 > 0e0 and r2 ~= r8[r1] then
-            r8[r1] = r2
-            r17()
-        elseif not r2 or r2 <= 0e0 then
+        local value = (text == formatNumber(CFG[key])) and CFG[key] or parseNumber(text)
+        if value and value > 0 and value ~= CFG[key] then
+            CFG[key] = value
+            saveConfig()
         end
-
-        r24 = true
-        r3:SetValue(r12(r8[r1]))
-        r24 = false
+        settingGuard = true
+        input:SetValue(formatNumber(CFG[key]))
+        settingGuard = false
     end
 
-    r3 = r53:AddInput(r1, {
-        Title = r,
-        Default = r12(r8[r1]),
+    input = tab:AddInput(key, {
+        Title = title,
+        Default = formatNumber(CFG[key]),
         Description = "Accepts 25k, 1.5M, 2B, 1e6, or 1e6 (1M)",
         Numeric = false,
         Finished = true,
-        Callback = r54,
+        Callback = commit,
     })
 
-    for r4, r5 in ipairs(r53.Container:GetDescendants()) do
-        if r5:IsA("TextBox") and not r2[r5] then
-            r18(r5.Focused, function()
-                r5.Text = r11(r8[r1], 1.6e1)
-            end)
-
-            r18(r5.FocusLost, function()
-                if r5.Text ~= r12(r8[r1]) then
-                    r54(r5.Text)
+    for _, object in ipairs(tab.Container:GetDescendants()) do
+        if object:IsA("TextBox") and not before[object] then
+            track(object.Focused:Connect(function()
+                object.Text = formatSci(CFG[key], 16)
+            end))
+            track(object.FocusLost:Connect(function()
+                if object.Text ~= formatNumber(CFG[key]) then
+                    commit(object.Text)
                 end
-            end)
-
+            end))
             break
         end
     end
 end
 
-r52(r36.Gears, "Minimum Shiny per reset", "r4")
-r44(r36.Gears, "r3", "Auto Reset Shiny → Life")
-r52(r36.Gears, "Minimum Life per reset", "r5")
+-- ==================== aba Mine ====================
 
-local r55 = r36.Monster:AddParagraph({ Title = "Monster Status", Content = "Monster automation is disabled" })
-r44(r36.Monster, "monsterClick", "Auto Monster Click")
-r44(r36.Monster, "monsterReset", "Auto Monster Sacrifice")
-r52(r36.Monster, "Minimum gain per monster sacrifice", "monsterMinimum")
-r44(r36.Monster, "monsterPerks", "Auto Monster Perks")
-r44(r36.Monster, "monsterUpgrades", "Auto Sacrifice Upgrades")
+addToggle(mineTab, "autoMine", "Auto Mine Â· K")
+addToggle(mineTab, "multiOres", "Multi Ores")
 
-local function r56(r)
-    r = math.max(0e0, math.ceil(r))
-    return string.format("%02d:%02d:%02d", math.floor(r / 3.6e3), math.floor(r / 6e1) % 6e1, r % 6e1)
-end
-
-local function r57(r)
-    if type(r) ~= "string" then
-        return nil
-    end
-
-    r = r:gsub("<[^>]+>", ""):gsub(",", "")
-    local r1 = r14(r:gsub("^%s*%+", ""))
-
-    if r1 then
-        return r1
-    end
-
-    r1 = r:match("[%d%.]+[eE][+%-]?%d+")
-
-    if r1 then
-        return r14(r1)
-    end
-
-    local r2, r3 = r:match("([%d%.]+)%s*([%a]*)")
-    return r2 and r14(r2 .. r3) or nil
-end
-
-local function r58(r, r1)
-    for r2, r3 in ipairs(r1) do
-        r = r and r:FindFirstChild(r3)
-    end
-
-    return r
-end
-
-local function r59(r)
-    if not r then
-        return false
-    end
-
-    local r60 = r:GetDescendants()
-    table.insert(r60, 1e0, r)
-
-    for r61, r62 in ipairs(r60) do
-        local r63 = true
-        local r64 = r62
-
-        while r64 and r64 ~= r.Parent do
-            if r64:IsA("GuiObject") and not r64.Visible then
-                r63 = false
-                break
-            end
-
-            r64 = r64.Parent
+local oreDurationSlider
+oreDurationSlider = mineTab:AddSlider("OreDuration", {
+    Title = "Time per ore (minutes)",
+    Description = "10-minute steps Â· 10 minutes to 4 hours",
+    Min = 10,
+    Max = 240,
+    Rounding = 0,
+    Default = CFG.duration / 60,
+    Callback = function(value)
+        if not guardsActive or settingGuard or not rt.alive then
+            return
         end
+        local snapped = math.clamp(math.floor(value / 10 + 0.5), 1, 24) * 10
+        if value ~= snapped then
+            settingGuard = true
+            oreDurationSlider:SetValue(snapped)
+            settingGuard = false
+        end
+        value = snapped
+        local seconds = value * 60
+        if seconds == CFG.duration then
+            return
+        end
+        CFG.duration = seconds
+        CFG.oreElapsed = math.min(CFG.oreElapsed, seconds)
+        saveConfig()
+    end,
+})
 
-        if r63 then
-            local r65, r66 = pcall(function()
-                return r62:GetAttributes()
-            end)
+local singleOreDropdown
+singleOreDropdown = mineTab:AddDropdown("SingleOre", {
+    Title = "Single Ore",
+    Description = "Used when Multi Ores is disabled",
+    Values = ORE_NAMES,
+    Multi = false,
+    Default = CFG.singleOre,
+    Callback = function(ore)
+        if not guardsActive or settingGuard or not rt.alive or not ORES[ore] or CFG.singleOre == ore then
+            return
+        end
+        CFG.singleOre = ore
+        if not CFG.multiOres then
+            resetOreProgress()
+        else
+            saveConfig()
+        end
+    end,
+})
 
-            if r65 then
-                for r67, r68 in pairs(r66) do
-                    local r69 = r67:lower()
-
-                    if
-                        (r69 == "maxed" or r69 == "ismaxed" or r69 == "completed" or r69 == "ismaxlevel")
-                        and r68 == true
-                    then
-                        return true
-                    end
-                end
-
-                local r70 = tonumber(r66.Level or r66.CurrentLevel)
-                local r71 = tonumber(r66.MaxLevel or r66.LevelCap)
-
-                if r70 and r71 and r71 > 0e0 and r70 >= r71 then
-                    return true
-                end
-            end
-
-            if r62:IsA("TextLabel") or r62:IsA("TextButton") or r62:IsA("TextBox") then
-                local r68 = r62.Text:gsub("<[^>]+>", ""):lower():gsub("^%s+", ""):gsub("%s+$", "")
-                local r69 = r62.Name:lower()
-
-                if
-                    r68:match("^max[!%.]*$")
-                    or r68:find("maxed", 1e0, true)
-                    or r68 == "maximum"
-                    or r68 == "max level"
-                    or r68 == "completed"
-                    or r68 == "fully upgraded"
-                then
-                    return true
-                end
-
-                if r69:find("level", 1e0, true) or r68:find("level", 1e0, true) then
-                    local r70, r71 = r68:match("(%d+)%s*/%s*(%d+)")
-
-                    if r70 and tonumber(r71) > 0e0 and tonumber(r70) >= tonumber(r71) then
-                        return true
-                    end
-
-                    if r68:find("(max)", 1e0, true) then
-                        return true
-                    end
-                end
+local cycleOresDropdown
+cycleOresDropdown = mineTab:AddDropdown("CycleOres", {
+    Title = "Cycle Ores",
+    Description = "Selection order determines the mining sequence",
+    Values = ORE_NAMES,
+    Multi = true,
+    Default = CFG.cycleOres,
+    Callback = function(selected)
+        if not guardsActive or settingGuard or not rt.alive then
+            return
+        end
+        local ordered = {}
+        for _, ore in ipairs(CFG.cycleOres) do
+            if selected[ore] then
+                ordered[#ordered + 1] = ore
             end
         end
-    end
+        for _, ore in ipairs(ORE_NAMES) do
+            if selected[ore] and not table.find(ordered, ore) then
+                ordered[#ordered + 1] = ore
+            end
+        end
+        if table.concat(ordered, "|") == table.concat(CFG.cycleOres, "|") then
+            return
+        end
+        CFG.cycleOres = ordered
+        if CFG.multiOres then
+            resetOreProgress()
+        else
+            saveConfig()
+        end
+    end,
+})
 
-    return false
+local function setCycleSelection(ores)
+    CFG.cycleOres = ores
+    local selected = {}
+    for _, ore in ipairs(ores) do
+        selected[ore] = true
+    end
+    settingGuard = true
+    cycleOresDropdown:SetValues(ORE_NAMES)
+    cycleOresDropdown:SetValue(selected)
+    cycleOresDropdown:SetValues(ORE_NAMES_SNAPSHOT)
+    settingGuard = false
+    resetOreProgress()
 end
 
-local function r72(r)
-    if r59(r) then
-        return nil, true
-    end
+mineTab:AddButton({
+    Title = "Select All",
+    Callback = function()
+        local ores = table.clone(CFG.cycleOres)
+        for _, ore in ipairs(ORE_NAMES) do
+            if not table.find(ores, ore) then
+                table.insert(ores, ore)
+            end
+        end
+        setCycleSelection(ores)
+    end,
+})
 
-    local r73 = r and r:FindFirstChild("Frame")
-    local r74 = r and (r:FindFirstChild("Price") or r73 and r73:FindFirstChild("Price"))
+mineTab:AddButton({
+    Title = "Clear Selection",
+    Callback = function()
+        setCycleSelection({})
+    end,
+})
 
-    if not r74 then
-        return nil, false
-    end
+-- ==================== aba Gears ====================
 
-    local r30
+addToggle(gearsTab, "autoUpgradeGears", "Auto Upgrade")
+addToggle(gearsTab, "autoResetNormal", "Auto Reset Normal â†’ Shiny")
+addNumberInput(gearsTab, "Minimum Shiny per reset", "minShiny")
+addToggle(gearsTab, "autoResetShiny", "Auto Reset Shiny â†’ Life")
+addNumberInput(gearsTab, "Minimum Life per reset", "minLife")
 
-    if r74:IsA("TextLabel") or r74:IsA("TextButton") or r74:IsA("TextBox") then
-        r30 = r74.Text
-    elseif r74:IsA("StringValue") or r74:IsA("NumberValue") or r74:IsA("IntValue") then
-        r30 = tostring(r74.Value)
-    end
+-- ==================== aba Monster ====================
 
-    if not r30 then
-        return nil, false
-    end
+addToggle(monsterTab, "monsterClick", "Auto Monster Click")
+addToggle(monsterTab, "monsterReset", "Auto Monster Sacrifice")
+addNumberInput(monsterTab, "Minimum gain per monster sacrifice", "monsterMinimum")
+addToggle(monsterTab, "monsterPerks", "Auto Monster Perks (max)")
+addToggle(monsterTab, "monsterUpgrades", "Auto Sacrifice Upgrades")
 
-    local r75 = r30:gsub("<[^>]+>", ""):lower()
+-- ==================== leitura de cards ====================
+-- Maxed SOMENTE pelo Progress "X/Y" (Level/UpgradeMax dao falso positivo).
 
-    if r75:gsub("%s", "") == "1,234" then
-        return nil, true
-    end
-
-    if r75:find("max", 1e0, true) then
-        return nil, true
-    end
-
-    if r75:match("^%s*free%s*$") then
-        return 0e0, false
-    end
-
-    return r57(r30), false
-end
-
-local function r76(r, r77)
-    if not r then
-        return nil
-    end
-
-    local r61, r78
-
-    for r79 = 1e0, r77 or 5e0 do
-        local r68, r80 = r72(r:FindFirstChild("Upgrade" .. r79))
-
-        if not r80 and r68 and (not r78 or r68 < r78) then
-            r61, r78 = r79, r68
+local function matchXY(text)
+    local from = 1
+    while from <= #text do
+        local start, stop, current, cap = text:find("(%d+)%s*/%s*(%d+)", from)
+        if not start then
+            return nil
+        end
+        if start > 1 and text:sub(start - 1, start - 1) == "." then
+            from = stop + 1
+        else
+            return tonumber(current), tonumber(cap)
         end
     end
-
-    return r61, r78
+    return nil
 end
 
-local function r81(r)
-    if not r then
+local function readProgress(container)
+    if not container then
         return nil
     end
-
-    if r:FindFirstChild("Upgrade1") and r:FindFirstChild("Upgrade7") then
-        return r
+    local progress = container:FindFirstChild("Progress")
+    if not progress then
+        progress = container:FindFirstChild("Progress", true)
     end
+    if not progress then
+        return nil
+    end
+    local ok, text = pcall(function()
+        return tostring(progress.Text)
+    end)
+    if not ok or type(text) ~= "string" then
+        return nil
+    end
+    text = text:gsub("<[^>]+>", ""):gsub("^%s*[Ll]evel%s*", "")
+    local current, cap = matchXY(text)
+    if current and cap and cap > 0 then
+        return current >= cap, current .. "/" .. cap
+    end
+    return false, text:sub(1, 12)
+end
 
-    local r82
+local function readCard(card, isMain)
+    if not card then
+        return false, nil, true, nil
+    end
+    local hud
+    if isMain then
+        hud = findPath(card, { "MainPart", "SurfaceGui", "Hud" })
+    else
+        hud = card:FindFirstChild("Frame")
+    end
+    if not hud then
+        return false, nil, true, nil
+    end
+    local isMax = false
+    local maxed, progStr = readProgress(hud)
+    if maxed == nil then
+        maxed, progStr = readProgress(card)
+    end
+    if maxed == true then
+        isMax = true
+    end
+    local price, invalid = nil, false
+    local priceObject = hud:FindFirstChild("Price")
+    if priceObject then
+        local ok, raw = pcall(function()
+            return tostring(priceObject.Text)
+        end)
+        raw = ok and raw or nil
+        if raw == "" or raw == "1,234" or raw == "0" then
+            invalid = true
+        else
+            price = parseTextNumber(raw)
+            if not price then
+                invalid = true
+            end
+        end
+    else
+        invalid = true
+    end
+    return isMax, price, invalid, progStr
+end
 
-    for r61, r62 in ipairs(r:GetDescendants()) do
-        if
-            r62.Name == "Upgrade1"
-            and (
-                r62:FindFirstChild("Price")
-                or r62:FindFirstChild("Frame") and r62.Frame:FindFirstChild("Price")
-            )
-        then
-            local r64 = r62.Parent
+local function findCheapest(container, maxId)
+    if not container then
+        return nil, nil
+    end
+    local bestId, bestPrice
+    for id = 1, maxId do
+        local card = container:FindFirstChild("Upgrade" .. id)
+        if card then
+            local frame = card:FindFirstChild("Frame") or card
+            local maxed = readProgress(frame)
+            if maxed == nil then
+                maxed = readProgress(card)
+            end
+            if maxed ~= true then
+                local priceObject = frame:FindFirstChild("Price")
+                local ok, raw = pcall(function()
+                    return priceObject and tostring(priceObject.Text) or nil
+                end)
+                local price = ok and raw and parseTextNumber(raw) or nil
+                if price and (not bestPrice or price < bestPrice) then
+                    bestId, bestPrice = id, price
+                end
+            end
+        end
+    end
+    return bestId, bestPrice
+end
 
-            if r64 and r64:FindFirstChild("Upgrade7") then
-                if r82 and r82 ~= r64 then
+local function findUpgradeBoard(root)
+    if not root then
+        return nil
+    end
+    if root:FindFirstChild("Upgrade1") and root:FindFirstChild("Upgrade7") then
+        return root
+    end
+    local found
+    for _, object in ipairs(root:GetDescendants()) do
+        if object.Name == "Upgrade1" and (object:FindFirstChild("Price") or (object:FindFirstChild("Frame") and object.Frame:FindFirstChild("Price"))) then
+            local parent = object.Parent
+            if parent and parent:FindFirstChild("Upgrade7") then
+                if found and found ~= parent then
                     return nil
                 end
-
-                r82 = r64
+                found = parent
             end
         end
     end
-
-    return r82
+    return found
 end
 
-r20(function()
-    local r83, r84, r85, r86 = 0e0, 0e0, 0e0, 0e0
-    local r87 = 0e0
-    local r88 = true
-    local r89 = {}
-    local r90 = 0e0
-    local r91, r92, r93, r94, r95, r96, r97, r98
-    local r99 = "Waiting for perk prices"
-    local r100 = "Waiting for sacrifice upgrade prices"
+-- ==================== console (debug) ====================
 
-    local function r101(r, r1, ...)
-        if not r or not r:IsA("RemoteEvent") then
-            if not r89[r1] then
-                r89[r1] = true
-            end
-
-            return false
-        end
-
-        local r2, r3 = pcall(r.FireServer, r, ...)
-
-        if not r2 then
-            return false
-        end
-
-        r89[r1] = nil
-        return true
+local function dumpCurrencies()
+    local lines = {}
+    local function add(line)
+        lines[#lines + 1] = tostring(line)
     end
+    add("=== Regrowth currency check Â· copie tudo daqui ===")
+    add("Money: " .. tostring(statValue(CURRENCY_NAMES.money)))
+    add("EmeraldCoins: " .. tostring(statValue(CURRENCY_NAMES.emerald)))
+    add("Gold: " .. tostring(statValue(CURRENCY_NAMES.gold)))
+    add("GoldenDiamond: " .. tostring(statValue(CURRENCY_NAMES.goldDiamond)))
+    add("PerkPoints: " .. tostring(statValue("PerkPoints")))
+    add("DarkLiquid: " .. tostring(statValue("DarkLiquid")))
+    local gainLabel = findPath(workspace, { "Boards", "MonsterSacrifice" })
+    gainLabel = gainLabel and gainLabel:FindFirstChild("Gain", true)
+    add("Monster Gain label: " .. (gainLabel and (gainLabel:GetFullName() .. " = " .. tostring(gainLabel.Text)) or "<not found>"))
+    local resetLabel = findPath(workspace, { "Boards", "GoldenDiamondReset" })
+    resetLabel = resetLabel and resetLabel:FindFirstChild("GoldDiamond", true)
+    add("GoldDiamond reset label: " .. (resetLabel and (resetLabel:GetFullName() .. " = " .. tostring(resetLabel.Text)) or "<not found>"))
+    add("=== fim ===")
+    warn(table.concat(lines, "\n"))
+end
 
-    while r7.r do
-        local r102 = os.clock()
+-- ==================== listener de rejeicao ====================
 
-        if r102 >= r90 then
-            r90 = r102 + 2e0
-            r91 = r58(game:GetService("ReplicatedStorage"), { "Events" })
-            r92 = r58(r, { "GameplayEvents", "MonsterGain" })
-            r93 = r58(r91, { "MonsterEvolution", "MonsterSacrifice" })
-            r94 = r58(r91, { "PerkUpgrade", "MonsterPerk" })
-            r95 = r58(r91, { "MonsterEvolution", "SacrificeUpgrade" })
-            r96 = r58(workspace, { "Boards", "MonsterSacrifice", "Sacrifice", "SurfaceGui", "Gain" })
-            r97 = r58(workspace, { "Boards", "MonsterLevel", "MonsterPerks", "SurfaceGui", "Info", "List" })
-            r98 = r81(r58(workspace, { "Boards", "MonsterSacrifice" })) or r81(r58(workspace, { "Boards" }))
+spawnTask(function()
+    for _ = 1, 30 do
+        if not rt.alive then
+            return
         end
-
-        if r8.monsterClick and r102 >= r83 then
-            r83 = r102 + 1e-1
-            r101(r92, "Monster click")
-        end
-
-        local r103 = r96 and r57(r96.Text) or nil
-
-        if r8.monsterReset and r102 >= r84 then
-            r84 = r102 + 1e0
-
-            if r103 and r103 >= r8.monsterMinimum and r101(r93, "Monster sacrifice") then
-                r87 = r102 + 2e-1
-                r88 = true
-                r85 = r87
-            elseif not r103 and not r89.Gain then
-                r89.Gain = true
-            end
-        end
-
-        if r103 then
-            r89.Gain = nil
-        end
-
-        if r8.monsterPerks and r102 >= r85 and r102 >= r87 then
-            r85 = r102 + 5e-1
-            local r61, r78 = r76(r97)
-            local r104, r105 = r72(r97 and r97:FindFirstChild("Upgrade1"))
-
-            if r88 and not r105 and r104 then
-                r61, r78 = 1e0, r104
-            end
-
-            if r61 then
-                r99 = "Next perk: " .. r61 .. (r78 and " · " .. r12(r78) or " · priority purchase")
-
-                if r101(r94, "Monster perk", r61) then
-                    r88 = false
+        local clientEvents = game:GetService("ReplicatedStorage"):FindFirstChild("ClientEvents")
+        local notifier = clientEvents and clientEvents:FindFirstChild("Notifier")
+        if notifier and notifier:IsA("RemoteEvent") then
+            track(notifier.OnClientEvent:Connect(function(message)
+                if type(message) == "string" then
+                    local low = message:lower()
+                    if low:find("reached max", 1, true) or low:find("reached upgrade limit", 1, true) then
+                        if lastFireKey and (os.clock() - lastFireTime) < 3 then
+                            rejectCooldown[lastFireKey] = os.clock() + 30
+                        end
+                    end
                 end
-            else
-                r99 = "No readable perk prices, or all perks are maxed"
-            end
+            end))
+            return
         end
-
-        if r8.monsterUpgrades and r102 >= r86 and r102 >= r87 then
-            r86 = r102 + 5e-1
-            local r61, r78 = r76(r98, 7e0)
-            local r106 = r:FindFirstChild("Stats")
-            local r107 = r106 and r106:FindFirstChild("Dark Liquid")
-            local r108 = r107 and r14(r107.Value)
-
-            if not r108 then
-                r100 = "Dark Liquid balance unavailable; purchases paused"
-            elseif r61 and r78 <= r108 then
-                r100 = "Next sacrifice upgrade: " .. r61 .. " · " .. r12(r78)
-                r101(r95, "Sacrifice upgrade", r61)
-            elseif r61 then
-                r100 = "Waiting for Dark Liquid: " .. r12(r108) .. " / " .. r12(r78)
-            else
-                r100 = "No readable sacrifice prices, or all upgrades are maxed"
-            end
-        end
-
-        r30(
-            r55,
-            "Click: "
-                .. (r8.monsterClick and "On" or "Off")
-                .. " · Sacrifice: "
-                .. (r8.monsterReset and "On" or "Off")
-                .. "\nExpected sacrifice gain: "
-                .. (r103 and r12(r103) or "Unavailable")
-                .. "\nPerks: "
-                .. (r8.monsterPerks and "On" or "Off")
-                .. " · Sacrifice upgrades: "
-                .. (r8.monsterUpgrades and "On" or "Off")
-                .. (r8.monsterPerks and "\n" .. r99 or "")
-                .. (r8.monsterUpgrades and "\n" .. r100 or "")
-        )
-
-        task.wait(1e-1)
+        task.wait(2)
     end
 end)
 
-local r109 = r36.Info:AddParagraph({ Title = "Gears", Content = "Loading statistics..." })
-local r110 = r36.Info:AddParagraph({ Title = "Mining", Content = "" })
-local r111 = r36.Info:AddParagraph({ Title = "Upgrades", Content = "" })
+-- ==================== thread Monster ====================
 
-r36.Settings:AddSection("Interface")
+spawnTask(function()
+    local nextClick, nextSacrifice, nextPerk, nextUpgrade = 0, 0, 0, 0
+    local perkPauseUntil = 0
+    local prioritizeFirstPerk = true
 
-r36.Settings:AddToggle("AutoHide", {
+    while rt.alive do
+        if CFG.monsterClick or CFG.monsterReset or CFG.monsterPerks or CFG.monsterUpgrades then
+            local now = os.clock()
+
+            local events = findPath(game:GetService("ReplicatedStorage"), { "Events" })
+            local monsterGain = findPath(plr, { "GameplayEvents", "MonsterGain" })
+            local monsterSacrifice = findPath(events, { "MonsterEvolution", "MonsterSacrifice" })
+            local monsterPerk = findPath(events, { "PerkUpgrade", "MonsterPerk" })
+            local sacrificeUpgrade = findPath(events, { "MonsterEvolution", "SacrificeUpgrade" })
+
+            local boards = workspace:FindFirstChild("Boards")
+            local sacrificeBoard = boards and boards:FindFirstChild("MonsterSacrifice")
+            local levelBoard = boards and boards:FindFirstChild("MonsterLevel")
+
+            local gainLabel = sacrificeBoard and sacrificeBoard:FindFirstChild("Gain", true) or nil
+            local perkList = findPath(levelBoard, { "MonsterPerks", "SurfaceGui", "Info", "List" })
+                or (levelBoard and levelBoard:FindFirstChild("List", true))
+                or nil
+            local sacList = findPath(sacrificeBoard, { "Sacrifice", "SurfaceGui", "Info", "List" })
+                or (sacrificeBoard and sacrificeBoard:FindFirstChild("List", true))
+                or findUpgradeBoard(sacrificeBoard)
+                or nil
+
+            if CFG.monsterClick and now >= nextClick then
+                nextClick = now + 0.05
+                fireRemote(monsterGain)
+            end
+
+            local gain = gainLabel and parseTextNumber(gainLabel.Text) or nil
+
+            if CFG.monsterReset and now >= nextSacrifice then
+                nextSacrifice = now + 1
+                if gain and gain >= CFG.monsterMinimum and fireRemote(monsterSacrifice) then
+                    perkPauseUntil = now + 0.2
+                    prioritizeFirstPerk = true
+                    nextPerk = perkPauseUntil
+                end
+            end
+
+            if CFG.monsterPerks and perkList and now >= nextPerk and now >= perkPauseUntil then
+                nextPerk = now + 0.5
+                local perkPoints = statValue("PerkPoints") or 0
+                local perkId, price
+                if prioritizeFirstPerk then
+                    local firstCard = perkList:FindFirstChild("Upgrade1")
+                    local firstMaxed, firstPrice = readCard(firstCard, false)
+                    if not firstMaxed and not firstMaxed ~= true and firstPrice then
+                        perkId, price = 1, firstPrice
+                    end
+                    if perkId then
+                        prioritizeFirstPerk = false
+                    end
+                end
+                if not perkId then
+                    perkId, price = findCheapest(perkList, 12)
+                end
+                if perkId and price and price <= perkPoints then
+                    local key = "P" .. perkId
+                    if (rejectCooldown[key] or 0) <= now then
+                        if fireRemote(monsterPerk, perkId, true) then
+                            noteFire(key)
+                            nextPerk = now + 2
+                        end
+                    end
+                end
+            end
+
+            if CFG.monsterUpgrades and sacList and now >= nextUpgrade and now >= perkPauseUntil then
+                nextUpgrade = now + 0.5
+                local balance = statValue("DarkLiquid") or statValue("Dark Liquid") or 0
+                local upgradeId, price = findCheapest(sacList, 7)
+                if upgradeId and price and price <= balance then
+                    local key = "S" .. upgradeId
+                    if (rejectCooldown[key] or 0) <= now then
+                        if fireRemote(sacrificeUpgrade, upgradeId) then
+                            noteFire(key)
+                            nextUpgrade = now + 1
+                        end
+                    end
+                end
+            end
+
+            task.wait(0.05)
+        else
+            task.wait(0.2)
+        end
+    end
+end)
+
+-- ==================== aba Upgrade Tree ====================
+
+treeTab:AddSection("Main Tree")
+addToggle(treeTab, "treeMain", "Auto Tree Upgrades")
+treeTab:AddParagraph({ Title = "Buying", Content = "1, 2, 3, 4, 5, 10, 19, 23, 26, 42, 43, 72" })
+
+treeTab:AddSection("Emerald")
+addToggle(treeTab, "treeEmerald", "Auto Emerald Upgrades (1-14)")
+
+treeTab:AddSection("Gold")
+addToggle(treeTab, "treeGold", "Auto Gold Upgrades (1-10)")
+
+treeTab:AddSection("Gold Diamond")
+addToggle(treeTab, "treeDiamond", "Auto Gold Diamond Upgrades")
+treeTab:AddParagraph({ Title = "Priority", Content = "10 > 3 > 2 > 6 > 14 > 1 > 9 > 11 > 15" })
+addToggle(treeTab, "diamondReset", "Auto Golden Diamond Reset")
+addNumberInput(treeTab, "Minimum to reset", "diamondResetMinimum")
+
+spawnTask(function()
+    local EMERALD_IDS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14 }
+    local GOLD_IDS = { 1, 2, 3, 4, 5, 6, 7, 8, 9, 10 }
+
+    local cd = {}
+    local mainIdx, emIdx, goldIdx, diaIdx = 1, 1, 1, 1
+    local nextMain, nextEmerald, nextGold, nextDiamond, nextResetCheck = 0, 0, 0, 0, 0
+
+    local function getBoardCard(board, prefix, id)
+        if not board then
+            return nil
+        end
+        local node = board:FindFirstChild(prefix)
+        node = node and node:FindFirstChild("SurfaceGui")
+        node = node and node:FindFirstChild("Info")
+        node = node and node:FindFirstChild("List")
+        return node and node:FindFirstChild("Upgrade" .. id) or nil
+    end
+
+    while rt.alive do
+        if CFG.treeMain or CFG.treeEmerald or CFG.treeGold or CFG.treeDiamond or CFG.diamondReset then
+            local now = os.clock()
+
+            -- Refetch a cada tick: apos o Diamond Reset o jogo recria TreeCards/Boards
+            local events = findPath(game:GetService("ReplicatedStorage"), { "Events" })
+            local treeRemote = events and events:FindFirstChild("UpgradeTree")
+            local emeraldRemote = treeRemote and treeRemote:FindFirstChild("EmeraldUpgrade")
+            local goldRemote = treeRemote and treeRemote:FindFirstChild("GoldUpgrade")
+            local diamondRemote = treeRemote and treeRemote:FindFirstChild("DiamondUpgrade")
+            local diamondResetRemote = treeRemote and treeRemote:FindFirstChild("DiamondReset")
+            local treeCards = workspace:FindFirstChild("TreeCards")
+            local boards = workspace:FindFirstChild("Boards")
+            local goldBarsBoard = boards and boards:FindFirstChild("GoldBarsReset")
+            local emeraldBoard = boards and boards:FindFirstChild("EmeraldCoinsReset")
+            local goldDiamondBoard = boards and boards:FindFirstChild("GoldenDiamondReset")
+            local goldDiamondLabel = goldDiamondBoard and goldDiamondBoard:FindFirstChild("GoldDiamond", true) or nil
+
+            if CFG.treeMain and treeRemote and now >= nextMain then
+                nextMain = now + 0.3
+                local money = statValue(CURRENCY_NAMES.money)
+                if money then
+                    for _ = 1, #TREE_MAIN_IDS do
+                        local id = TREE_MAIN_IDS[mainIdx]
+                        local key = "M" .. id
+                        if (cd[key] or 0) <= now and (rejectCooldown[key] or 0) <= now then
+                            local card = treeCards and treeCards:FindFirstChild(tostring(id))
+                            local isMax, price, invalid = readCard(card, true)
+                            if isMax then
+                                cd[key] = now + 5
+                            elseif not invalid and price and price <= money then
+                                noteFire(key)
+                                if fireRemote(treeRemote, id, true) then
+                                    cd[key] = now + 1
+                                    mainIdx = mainIdx % #TREE_MAIN_IDS + 1
+                                    break
+                                end
+                            end
+                        end
+                        mainIdx = mainIdx % #TREE_MAIN_IDS + 1
+                    end
+                end
+            end
+
+            if CFG.treeEmerald and emeraldRemote and now >= nextEmerald then
+                nextEmerald = now + 0.3
+                local balance = statValue(CURRENCY_NAMES.emerald)
+                if balance then
+                    for _ = 1, #EMERALD_IDS do
+                        local id = EMERALD_IDS[emIdx]
+                        local key = "E" .. id
+                        if (cd[key] or 0) <= now and (rejectCooldown[key] or 0) <= now then
+                            local card = getBoardCard(emeraldBoard, "EmeraldUpgrades", id)
+                            local isMax, price, invalid = readCard(card, false)
+                            if isMax then
+                                cd[key] = now + 5
+                            elseif not invalid and price and price <= balance then
+                                noteFire(key)
+                                if fireRemote(emeraldRemote, id, true) then
+                                    cd[key] = now + 1
+                                    emIdx = emIdx % #EMERALD_IDS + 1
+                                    break
+                                end
+                            end
+                        end
+                        emIdx = emIdx % #EMERALD_IDS + 1
+                    end
+                end
+            end
+
+            if CFG.treeGold and goldRemote and now >= nextGold then
+                nextGold = now + 0.3
+                local balance = statValue(CURRENCY_NAMES.gold)
+                if balance then
+                    for _ = 1, #GOLD_IDS do
+                        local id = GOLD_IDS[goldIdx]
+                        local key = "G" .. id
+                        if (cd[key] or 0) <= now and (rejectCooldown[key] or 0) <= now then
+                            local card = getBoardCard(goldBarsBoard, "GoldUpgrades", id)
+                            local isMax, price, invalid = readCard(card, false)
+                            if isMax then
+                                cd[key] = now + 5
+                            elseif not invalid and price and price <= balance then
+                                noteFire(key)
+                                if fireRemote(goldRemote, id, true) then
+                                    cd[key] = now + 1
+                                    goldIdx = goldIdx % #GOLD_IDS + 1
+                                    break
+                                end
+                            end
+                        end
+                        goldIdx = goldIdx % #GOLD_IDS + 1
+                    end
+                end
+            end
+
+            if CFG.treeDiamond and diamondRemote and now >= nextDiamond then
+                nextDiamond = now + 0.3
+                local balance = statValue(CURRENCY_NAMES.goldDiamond)
+                if balance then
+                    for _ = 1, #DIAMOND_ORDER do
+                        local id = DIAMOND_ORDER[diaIdx]
+                        local key = "D" .. id
+                        if (cd[key] or 0) <= now and (rejectCooldown[key] or 0) <= now then
+                            local card = getBoardCard(goldDiamondBoard, "GoldUpgrades", id)
+                            local isMax, price, invalid = readCard(card, false)
+                            if isMax then
+                                cd[key] = now + 5
+                            elseif not invalid and price and price <= balance then
+                                noteFire(key)
+                                if fireRemote(diamondRemote, id, true) then
+                                    cd[key] = now + 1
+                                    diaIdx = diaIdx % #DIAMOND_ORDER + 1
+                                    break
+                                end
+                            end
+                        end
+                        diaIdx = diaIdx % #DIAMOND_ORDER + 1
+                    end
+                end
+            end
+
+            if CFG.diamondReset and diamondResetRemote and now >= nextResetCheck then
+                nextResetCheck = now + 3
+                local gain = goldDiamondLabel and parseTextNumber(goldDiamondLabel.Text) or nil
+                if gain and gain >= CFG.diamondResetMinimum then
+                    if fireRemote(diamondResetRemote) then
+                        for key in pairs(cd) do
+                            cd[key] = 0
+                        end
+                        for key in pairs(rejectCooldown) do
+                            rejectCooldown[key] = 0
+                        end
+                        mainIdx, emIdx, goldIdx, diaIdx = 1, 1, 1, 1
+                        task.wait(1.5)
+                    end
+                end
+            end
+
+            task.wait(0.1)
+        else
+            task.wait(0.2)
+        end
+    end
+end)
+
+-- ==================== aba Settings ====================
+
+settingsTab:AddSection("Interface")
+
+settingsTab:AddToggle("AutoHide", {
     Title = "Auto Hide UI",
     Description = "Starts minimized on the next run",
-    Default = r8.hide,
-    Callback = function(r)
-        if not r23 or not r7.r or r8.hide == r then
+    Default = CFG.hide,
+    Callback = function(value)
+        if not guardsActive or settingGuard or not rt.alive or CFG.hide == value then
             return
         end
-
-        r8.hide = r
-        r17()
+        CFG.hide = value
+        saveConfig()
     end,
 })
 
-r29 = r36.Settings:AddButton({
-    Title = "Toggle Keybind · " .. r8.key,
+addToggle(settingsTab, "hideOrePopup", "Hide Ore Popups")
+
+keybindButton = settingsTab:AddButton({
+    Title = "Toggle Keybind Â· " .. CFG.key,
     Description = "Click, then press a key. Escape cancels. K is reserved for mining.",
     Callback = function()
-        r28 = true
-        r29:SetTitle("Press a key · Escape cancels")
+        waitingForKey = true
+        keybindButton:SetTitle("Press a key Â· Escape cancels")
     end,
 })
 
-r36.Settings:AddSection("Exit")
+settingsTab:AddSection("Console")
 
-r36.Settings:AddButton({
+settingsTab:AddButton({
+    Title = "Check currencies",
+    Description = "Prints the currency values used by the script to the console (F9)",
+    Callback = dumpCurrencies,
+})
+
+settingsTab:AddSection("Exit")
+
+settingsTab:AddButton({
     Title = "Uninject",
     Description = "Saves configuration, stops automation, and removes the interface",
     Callback = function()
-        r22:Dialog({
+        window:Dialog({
             Title = "Uninject",
             Content = "Stop Regrowth Incremental and remove its interface?",
             Buttons = {
-                { Title = "Confirm", Callback = r31 },
+                { Title = "Confirm", Callback = unload },
                 { Title = "Cancel" },
             },
         })
     end,
 })
 
-r18(r2.InputBegan, function(r, r1)
-    if not r7.r or r2:GetFocusedTextBox() then
+-- ==================== input ====================
+
+track(UserInputService.InputBegan:Connect(function(input, processed)
+    if not rt.alive or UserInputService:GetFocusedTextBox() then
         return
     end
 
-    if r28 then
-        if r.UserInputType ~= Enum.UserInputType.Keyboard then
+    if waitingForKey then
+        if input.UserInputType ~= Enum.UserInputType.Keyboard then
             return
         end
-
-        if r.KeyCode == Enum.KeyCode.Escape then
-            r28 = false
-        elseif table.find({ "K", "Unknown", "F9", "F11", "F12", "PrintScreen" }, r.KeyCode.Name) then
+        if input.KeyCode == Enum.KeyCode.Escape then
+            waitingForKey = false
+        elseif table.find({ "K", "Unknown", "F9", "F11", "F12", "PrintScreen" }, input.KeyCode.Name) then
             return
         else
-            r8.key = r.KeyCode.Name
-            r21.MinimizeKey.Name = r8.key
-            r28 = false
-            r17()
+            CFG.key = input.KeyCode.Name
+            library.MinimizeKey.Name = CFG.key
+            waitingForKey = false
+            saveConfig()
         end
-
-        r29:SetTitle("Toggle Keybind · " .. r8.key)
+        keybindButton:SetTitle("Toggle Keybind Â· " .. CFG.key)
         return
     end
 
-    if r1 then
+    if processed then
         return
     end
 
-    if r.KeyCode.Name == r8.key then
-        r22:Minimize()
-    elseif r.KeyCode == Enum.KeyCode.K then
-        r7.r4.r:SetValue(not r8.r)
+    if input.KeyCode.Name == CFG.key then
+        window:Minimize()
+    elseif input.KeyCode == Enum.KeyCode.K then
+        rt.toggles.autoMine:SetValue(not CFG.autoMine)
     end
-end)
+end))
 
-r23 = true
-r22:SelectTab(1e0)
+-- ==================== thread Mine / Gears ====================
 
-if r8.hide then
-    r21:Notify({
-        Title = "Regrowth Incremental",
-        Content = "Interface hidden. Press " .. r8.key .. " to open.",
-        Duration = 6e0,
-    })
-end
+spawnTask(function()
+    local gameplayEvents = plr:WaitForChild("GameplayEvents", 15)
+    local statsFolder = plr:WaitForChild("Stats", 15)
+    local eventsFolder = game:GetService("ReplicatedStorage"):WaitForChild("Events", 15)
 
-r20(function()
-    local r112 = r:WaitForChild("GameplayEvents", 1.5e1)
-    local r113 = r:WaitForChild("Stats", 1.5e1)
-    local r114 = game:GetService("ReplicatedStorage"):WaitForChild("Events", 1.5e1)
-
-    if not r7.r then
+    if not rt.alive then
         return
     end
 
-    assert(r112 and r113 and r114, "GameplayEvents, Stats, or Events unavailable")
-    local r115 = r112:WaitForChild("Mining", 1.5e1)
-    local r116 = r115 and r115:WaitForChild("MineOre", 1.5e1)
-    local r117 = r114:WaitForChild("GearsUpgrade", 1.5e1)
-    local r118 = r117 and r117:WaitForChild("GearsReset", 1.5e1)
-    local r119 = r114:WaitForChild("MineOre", 1.5e1)
-    local r120 = r119 and r119:WaitForChild("SetDepth", 1.5e1)
-    local r121 = r119 and r119:WaitForChild("MiningTier", 1.5e1)
-    local r122 = r114:WaitForChild("AdjustSetting", 1.5e1)
+    assert(gameplayEvents and statsFolder and eventsFolder, "GameplayEvents, Stats, or Events unavailable")
 
-    if not r7.r then
+    local miningEvents = gameplayEvents:WaitForChild("Mining", 15)
+    local mineOreRemote = miningEvents and miningEvents:WaitForChild("MineOre", 15)
+    local gearsUpgradeRemote = eventsFolder:WaitForChild("GearsUpgrade", 15)
+    local gearsResetRemote = gearsUpgradeRemote and gearsUpgradeRemote:WaitForChild("GearsReset", 15)
+    local mineOreFolder = eventsFolder:WaitForChild("MineOre", 15)
+    local setDepthRemote = mineOreFolder and mineOreFolder:WaitForChild("SetDepth", 15)
+    local miningTierRemote = mineOreFolder and mineOreFolder:WaitForChild("MiningTier", 15)
+    local adjustSettingRemote = eventsFolder:WaitForChild("AdjustSetting", 15)
+
+    if not rt.alive then
         return
     end
 
-    assert(r116 and r117 and r118 and r120 and r121 and r122, "Mining remotes unavailable")
+    assert(mineOreRemote and gearsUpgradeRemote and gearsResetRemote and setDepthRemote and miningTierRemote and adjustSettingRemote, "Mining remotes unavailable")
 
-    local function r123(r)
-        local r1 = r113:FindFirstChild(r)
-        return r1 and tonumber(r1.Value) or 0e0
+    local function getStat(name)
+        local value = statsFolder:FindFirstChild(name)
+        return value and tonumber(value.Value) or 0
     end
 
-    local function r124(r)
-        local r1 = workspace:FindFirstChild("Boards")
-        r1 = r1 and r1:FindFirstChild("GearTypes")
-        r1 = r1 and r1:FindFirstChild("GearsReset")
-        r1 = r1 and r1:FindFirstChild("SurfaceGui")
-        r1 = r1 and r1:FindFirstChild("Info")
-        r1 = r1 and r1:FindFirstChild("Gear" .. r)
-        r1 = r1 and r1:FindFirstChild("NextGears")
-
-        if not r1 then
-            return 0e0
+    local function getNextGearsReward(index)
+        local node = findPath(workspace, { "Boards", "GearTypes", "GearsReset", "SurfaceGui", "Info", "Gear" .. index, "NextGears" })
+        if not node then
+            return 0
         end
-
-        return r14(r1.Text:gsub("^%s*%+", "")) or 0e0
+        return parseNumber(node.Text:gsub("^%s*%+", "")) or 0
     end
 
-    local r125 = { 5e1, 6.5e1, 8e1, 9.5e1, 1.2e2 }
-    local r126 = { 0e0, 0e0, 0e0, 0e0, 0e0 }
+    local gearThresholds = { 50, 65, 80, 95, 120 }
+    local gearCooldowns = { 0, 0, 0, 0, 0 }
 
-    r20(function()
-        while r7.r do
-            if r8.r then
-                local r = r8.r8 and r8.r6[r8.r9] or r8.r7
-
-                if r8.r8 and #r8.r6 == 0e0 then
-                    r = nil
+    spawnTask(function()
+        while rt.alive do
+            if CFG.autoMine then
+                local ore = CFG.multiOres and CFG.cycleOres[CFG.oreSlot] or CFG.singleOre
+                if CFG.multiOres and #CFG.cycleOres == 0 then
+                    ore = nil
                 end
 
-                if r and r ~= r7.r8 then
-                    local r1 = r7.r10
+                if ore and ore ~= rt.currentOre then
+                    local generation = rt.session
 
-                    local function r127()
-                        return r7.r and r8.r and r1 == r7.r10
+                    local function isCurrent()
+                        return rt.alive and CFG.autoMine and generation == rt.session
                     end
 
-                    local function r128()
-                        r122:FireServer(r9[r][2e0], "OreLuck")
-                        task.wait(1.5e-1)
-
-                        if not r127() then
-                            return
-                        end
-
-                        r120:FireServer(r9[r][1e0])
-                        task.wait(4e-1)
-
-                        if not r127() then
-                            return
-                        end
-
-                        r121:FireServer(1e0)
-                        task.wait(1.5e-1)
-
-                        if not r127() then
-                            return
-                        end
-
-                        r121:FireServer(1e0)
-                        task.wait(2e-1)
-
-                        if r127() then
-                            r7.r8 = r
-                            r7.r7 = nil
+                    local function applyOreSetup()
+                        adjustSettingRemote:FireServer(ORES[ore][2], "OreLuck")
+                        task.wait(0.15)
+                        if not isCurrent() then return end
+                        setDepthRemote:FireServer(ORES[ore][1])
+                        task.wait(0.4)
+                        if not isCurrent() then return end
+                        miningTierRemote:FireServer(1)
+                        task.wait(0.15)
+                        if not isCurrent() then return end
+                        miningTierRemote:FireServer(1)
+                        task.wait(0.2)
+                        if isCurrent() then
+                            rt.currentOre = ore
                         end
                     end
 
-                    r7.r5 = true
-                    local r2, r3 = pcall(r128)
-                    r7.r5 = false
-
-                    if not r2 then
-                        error(r3, 0e0)
+                    local ok, err = pcall(applyOreSetup)
+                    if not ok then
+                        error(err, 0)
                     end
                 end
 
-                if r and r8.r and r7.r8 == r then
-                    local r1 = os.clock()
-                    local r3 = r7.r10
-
-                    for r2 = 1e0, 5e0 do
-                        if not r7.r or not r8.r or r3 ~= r7.r10 then
+                if ore and CFG.autoMine and rt.currentOre == ore then
+                    local cycleStarted = os.clock()
+                    local generation = rt.session
+                    for index = 1, 5 do
+                        if not rt.alive or not CFG.autoMine or generation ~= rt.session then
                             break
                         end
-
-                        r116:FireServer(r2)
-                        task.wait(2e-2)
+                        mineOreRemote:FireServer(index)
+                        task.wait(0.02)
                     end
+                    task.wait(0.05)
 
-                    task.wait(5e-2)
-
-                    if r8.r8 and r8.r and r3 == r7.r10 and r8.r6[r8.r9] == r then
-                        r8.r10 = r8.r10 + os.clock() - r1
-
-                        if r8.r10 >= r8.duration then
-                            r8.r10 = r8.r10 % r8.duration
-                            r8.r9 = r8.r9 % #r8.r6 + 1e0
-
-                            r7.r8 = nil
-                            r17()
+                    if CFG.multiOres and CFG.autoMine and generation == rt.session and CFG.cycleOres[CFG.oreSlot] == ore then
+                        CFG.oreElapsed = CFG.oreElapsed + os.clock() - cycleStarted
+                        if CFG.oreElapsed >= CFG.duration then
+                            CFG.oreElapsed = CFG.oreElapsed % CFG.duration
+                            CFG.oreSlot = CFG.oreSlot % #CFG.cycleOres + 1
+                            rt.currentOre = nil
+                            saveConfig()
                         end
                     end
                 else
-                    task.wait(2e-1)
+                    task.wait(0.2)
                 end
             else
-                task.wait(2e-1)
+                task.wait(0.2)
             end
         end
     end)
 
-    r20(function()
-        while r7.r do
-            if r8.r1 then
-                for r = 5e0, 1e0, -1e0 do
-                    if not r7.r or not r8.r1 then
+    spawnTask(function()
+        while rt.alive do
+            if CFG.autoUpgradeGears then
+                for tier = 5, 1, -1 do
+                    if not rt.alive or not CFG.autoUpgradeGears then
                         break
                     end
-
                     if
-                        (r == 1e0 or r123("GearsUpgrade" .. (r - 1e0)) >= r125[r - 1e0])
-                        and r123("GearsUpgrade" .. r) < r125[r]
-                        and os.clock() >= r126[r]
+                        (tier == 1 or getStat("GearsUpgrade" .. (tier - 1)) >= gearThresholds[tier - 1])
+                        and getStat("GearsUpgrade" .. tier) < gearThresholds[tier]
+                        and os.clock() >= gearCooldowns[tier]
                     then
-                        local r1 = r123("GearsUpgrade" .. r)
-                        r117:FireServer(r, true)
-                        task.wait(1e0)
-
-                        if r1 == r123("GearsUpgrade" .. r) then
-                            r126[r] = os.clock() + 1.5e1
-                        else
+                        local before = getStat("GearsUpgrade" .. tier)
+                        gearsUpgradeRemote:FireServer(tier, true)
+                        task.wait(1)
+                        if before == getStat("GearsUpgrade" .. tier) then
+                            gearCooldowns[tier] = os.clock() + 15
                         end
-
-                        task.wait(3e-1)
+                        task.wait(0.3)
                     end
                 end
             end
-
-            task.wait(3e-1)
+            task.wait(0.3)
         end
     end)
 
-    r20(function()
-        while r7.r do
-            if r8.r2 and r124(1e0) >= r8.r4 then
-                r118:FireServer(1e0)
-                task.wait(1e0)
+    spawnTask(function()
+        while rt.alive do
+            if CFG.autoResetNormal and getNextGearsReward(1) >= CFG.minShiny then
+                gearsResetRemote:FireServer(1)
+                task.wait(1)
             end
-
-            if r8.r3 and r124(2e0) >= r8.r5 then
-                r118:FireServer(2e0)
-                task.wait(1e0)
+            if CFG.autoResetShiny and getNextGearsReward(2) >= CFG.minLife then
+                gearsResetRemote:FireServer(2)
+                task.wait(1)
             end
-
-            task.wait(3e-1)
-        end
-    end)
-
-    r20(function()
-        while r7.r do
-            r30(
-                r109,
-                string.format(
-                    "Normal: %s\nShiny: %s\nLife: %s\nTitanic: %s",
-                    r12(r123("Gears")),
-                    r12(r123("Gears2")),
-                    r12(r123("Gears3")),
-                    r12(r123("Gears4"))
-                )
-            )
-
-            r30(
-                r110,
-                string.format("Depth: %s\nOre luck: %s", r12(r123("MiningDepth")), r12(r123("CustomOreLuck")))
-            )
-
-            local r = {}
-
-            for r1 = 1e0, 5e0 do
-                table.insert(
-                    r,
-                    string.format("Upgrade %d: %s / %s", r1, r12(r123("GearsUpgrade" .. r1)), r12(r125[r1]))
-                )
-            end
-
-            r30(r111, table.concat(r, "\n"))
-            task.wait(5e-1)
+            task.wait(0.3)
         end
     end)
 end)
 
-r20(function()
-    local r = os.clock()
+-- ==================== hide ore popups ====================
 
-    while r7.r do
-        local r1 = math.ceil(math.max(0e0, r8.duration - r8.r10))
-
-        r30(
-            r47,
-            r7.r7
-                or (
-                    r7.r5 and "Applying ore setup..."
-                    or (
-                        (r8.r and "Active: " or "Paused: ")
-                        .. (r7.r8 or "—")
-                        .. (
-                            r8.r8
-                                and string.format(
-                                    "\n%02d:%02d:%02d remaining · %d/%d",
-                                    math.floor(r1 / 3.6e3),
-                                    math.floor(r1 / 6e1) % 6e1,
-                                    r1 % 6e1,
-                                    r8.r9,
-                                    #r8.r6
-                                )
-                            or ""
-                        )
-                    )
-                )
-        )
-
-        if r8.r8 and #r8.r6 == 0e0 then
-            r30(r47, "Select at least one ore")
+spawnTask(function()
+    local playerGui = plr:WaitForChild("PlayerGui", 10)
+    while rt.alive do
+        if CFG.hideOrePopup and playerGui then
+            local gameUi = playerGui:FindFirstChild("GameUi")
+            if gameUi then
+                local template = gameUi:FindFirstChild("PopUpTemplate")
+                if template and template.Visible then
+                    template.Visible = false
+                end
+                for _, object in ipairs(gameUi:GetChildren()) do
+                    if object.Name:find("PopUp") and object:IsA("GuiObject") and object.Visible then
+                        object.Visible = false
+                    end
+                end
+            end
         end
-
-        r51(r50, { Size = UDim2.fromScale(r8.r8 and math.clamp(r8.r10 / r8.duration, 0e0, 1e0) or 0e0, 1e0) })
-        r30(rSaveStatus, r7.r6 or "Automatic configuration")
-
-        r30(
-            r48,
-            string
-                .format("%.1f", r8.r8 and math.clamp(r8.r10 / r8.duration * 1e2, 0e0, 1e2) or 0e0)
-                :gsub("%.0$", "")
-                .. "% ("
-                .. r56(r8.duration - r8.r10)
-                .. " remaining)"
-        )
-
-        if os.clock() - r >= 3e1 then
-            r17()
-            r = os.clock()
-        end
-
-        task.wait(5e-1)
+        RunService.RenderStepped:Wait()
     end
 end)
 
-r17()
+-- ==================== auto-save ====================
+
+spawnTask(function()
+    while rt.alive do
+        task.wait(30)
+        if rt.alive then
+            saveConfig()
+        end
+    end
+end)
+
+guardsActive = true
+window:SelectTab(1)
+
+if CFG.hide then
+    library:Notify({
+        Title = "Regrowth Incremental",
+        Content = "Interface hidden. Press " .. CFG.key .. " to open.",
+        Duration = 6,
+    })
+end
+
+saveConfig()
 
 ]====]
 
-local r1, r2 = loadstring(r, "=Regrowth.Main.Recovery")
+local chunk, syntaxError = loadstring(source, "=Regrowth.Main.Recovery")
 
-if not r1 then
-    error("[Regrowth.Main syntax] " .. tostring(r2), 0e0)
+if not chunk then
+    error("[Regrowth.Main syntax] " .. tostring(syntaxError), 0)
 end
 
-local r3, r4 = xpcall(r1, debug.traceback)
+local ok, runtimeError = xpcall(chunk, debug.traceback)
 
-if not r3 then
-    warn("[Regrowth.Main runtime] " .. tostring(r4))
-    error(r4, 0e0)
+if not ok then
+    warn("[Regrowth.Main runtime] " .. tostring(runtimeError))
+    error(runtimeError, 0)
 end
